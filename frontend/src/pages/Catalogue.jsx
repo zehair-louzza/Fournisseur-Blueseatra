@@ -14,6 +14,23 @@ import {
 
 const ALL = "__all__";
 
+const getOffers = (a) => {
+  const map = {};
+  (a.offers || []).forEach((o) => {
+    if (o.prix_ht == null) return;
+    if (!map[o.fournisseur] || o.prix_ht < map[o.fournisseur].prix_ht) map[o.fournisseur] = o;
+  });
+  return Object.values(map).sort((x, y) => x.prix_ht - y.prix_ht);
+};
+const currentOffer = (a, chosen) => {
+  const list = getOffers(a);
+  const found = list.find((o) => o.fournisseur === chosen[a.code]);
+  if (found) return found;
+  if (a.prix_achat_ht != null)
+    return { fournisseur: a.fournisseur_retenu, prix_ht: a.prix_achat_ht, retrait: a.retrait, type_prix: a.type_prix };
+  return list[0] || { fournisseur: a.fournisseur_retenu, prix_ht: null, retrait: a.retrait };
+};
+
 export default function Catalogue() {
   const [filters, setFilters] = useState({ lots: [], fournisseurs: [], statuts: [] });
   const [q, setQ] = useState({ search: "", lot: ALL, fournisseur: ALL, statut: ALL, sort: "code" });
@@ -23,6 +40,7 @@ export default function Catalogue() {
   const [detail, setDetail] = useState(null);
   const [vue, setVue] = useState("tout");
   const [importing, setImporting] = useState(false);
+  const [chosen, setChosen] = useState({});
   const fileRef = useRef(null);
   const { addItem, addOffer, items } = useEstimate();
   const pageSize = 25;
@@ -65,7 +83,7 @@ export default function Catalogue() {
   };
 
   const totalPages = Math.max(1, Math.ceil(data.total / pageSize));
-  const inBasket = (code) => items.some((i) => i.code === code);
+  const inBasket = (code) => items.some((i) => i.code === code || i.code.startsWith(code + "@"));
 
   const resetFilters = () =>
     setQ({ search: "", lot: ALL, fournisseur: ALL, statut: ALL, sort: "code" });
@@ -179,8 +197,9 @@ export default function Catalogue() {
                 <th className="px-4 py-3 text-left font-medium">Code</th>
                 <th className="px-3 py-3 text-left font-medium">Article</th>
                 <th className="px-3 py-3 text-left font-medium">Lot</th>
-                <th className="px-3 py-3 text-left font-medium">Fournisseur</th>
+                <th className="px-3 py-3 text-left font-medium">Fournisseur (choix)</th>
                 <th className="px-3 py-3 text-right font-medium">Prix achat HT</th>
+                <th className="px-3 py-3 text-left font-medium">Livraison / dispo</th>
                 <th className="px-3 py-3 text-center font-medium">Fiabilité</th>
                 <th className="px-4 py-3 text-right font-medium">Action</th>
               </tr>
@@ -189,36 +208,58 @@ export default function Catalogue() {
               {loading &&
                 Array.from({ length: 8 }).map((_, i) => (
                   <tr key={i} className="border-b border-border/40">
-                    <td colSpan={7} className="px-4 py-3">
+                    <td colSpan={8} className="px-4 py-3">
                       <div className="h-5 w-full animate-pulse rounded bg-secondary" />
                     </td>
                   </tr>
                 ))}
               {!loading && data.items.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
+                <tr><td colSpan={8} className="px-4 py-16 text-center text-muted-foreground">
                   <Package className="mx-auto mb-2 h-8 w-8 opacity-40" />Aucun article trouvé.
                 </td></tr>
               )}
-              {!loading && data.items.map((a) => (
+              {!loading && data.items.map((a) => {
+                const opts = getOffers(a);
+                const co = currentOffer(a, chosen);
+                return (
                 <tr key={a.code} data-testid={`catalogue-row-${a.code}`}
                   onClick={() => setDetail(a)}
                   className="cursor-pointer border-b border-border/40 last:border-0 hover:bg-secondary/40 transition-colors">
                   <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground whitespace-nowrap">{a.code}</td>
-                  <td className="px-3 py-2.5 max-w-[280px]">
+                  <td className="px-3 py-2.5 max-w-[240px]">
                     <p className="font-medium text-foreground truncate">{a.article}</p>
                     {a.marque && <p className="text-xs text-muted-foreground truncate">{a.marque}</p>}
                   </td>
                   <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{lotLabel(a.lot)}</td>
-                  <td className="px-3 py-2.5 text-xs whitespace-nowrap">{a.fournisseur_retenu || "—"}</td>
-                  <td className="px-3 py-2.5 text-right font-mono font-semibold tabular-nums whitespace-nowrap">
-                    {a.prix_achat_ht ? (<>{eur(a.prix_achat_ht)}{a.unite && <span className="ml-0.5 text-[11px] font-normal text-muted-foreground">/{a.unite}</span>}</>) : <span className="text-muted-foreground">—</span>}
+                  <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                    {opts.length > 0 ? (
+                      <Select value={co.fournisseur || undefined}
+                        onValueChange={(v) => setChosen((c) => ({ ...c, [a.code]: v }))}>
+                        <SelectTrigger data-testid={`supplier-choice-${a.code}`} className="h-8 w-[210px] text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {opts.map((o) => (
+                            <SelectItem key={o.fournisseur} value={o.fournisseur} className="text-xs">
+                              {o.fournisseur} · {eur(o.prix_ht)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">{a.fournisseur_retenu || "—"}</span>
+                    )}
                   </td>
+                  <td className="px-3 py-2.5 text-right font-mono font-semibold tabular-nums whitespace-nowrap">
+                    {co.prix_ht != null ? (<>{eur(co.prix_ht)}{a.unite && <span className="ml-0.5 text-[11px] font-normal text-muted-foreground">/{a.unite}</span>}</>) : <span className="text-muted-foreground">—</span>}
+                  </td>
+                  <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[190px]">{co.retrait || a.retrait || "—"}</td>
                   <td className="px-3 py-2.5 text-center"><StatutBadge statut={a.statut} small /></td>
                   <td className="px-4 py-2.5 text-right">
                     <button
                       data-testid={`add-article-to-estimate-btn-${a.code}`}
-                      disabled={!a.prix_achat_ht}
-                      onClick={(e) => { e.stopPropagation(); addItem(a); }}
+                      disabled={co.prix_ht == null}
+                      onClick={(e) => { e.stopPropagation(); if (chosen[a.code]) { addOffer(a, co); } else { addItem(a); } }}
                       className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
                         inBasket(a.code)
                           ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600"
@@ -229,7 +270,8 @@ export default function Catalogue() {
                     </button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

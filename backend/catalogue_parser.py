@@ -92,7 +92,9 @@ def parse_catalogue(content: bytes) -> dict:
                 "designation": _clean(r[10]),
                 "marque": _clean(r[11]),
                 "ref_fournisseur": _clean(r[12]),
+                "unite_vente": _clean(r[13]),
                 "conditionnement": _clean(r[14]),
+                "retrait": _clean(r[15]),
                 "fiabilite": _clean(r[16]),
                 "rang": _num(r[19]),
             }

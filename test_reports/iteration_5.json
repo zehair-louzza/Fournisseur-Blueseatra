@@ -1,0 +1,26 @@
+{
+  "summary": "Iteration 5 targeted retest on Catalogue supplier picker + Livraison column. All 4 scenarios PASSED. Backend GET /api/catalogue/{code} returns offers with 'retrait' + 'unite_vente'. Frontend supplier-choice dropdown lists all offers with prices, switching supplier updates price/unit + Livraison column, add-to-basket carries the chosen supplier/price into /estimateur. À compléter articles show '—' with no dropdown. stopPropagation on dropdown correctly prevents opening the detail dialog; row click still opens it. Prix retenus tab unchanged and functional (25 rows, Livraison column present).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "article-detail-dialog & Radix Selects", "issues": ["Existing console a11y warning (already noted iter 3/4): Missing `Description` or `aria-describedby` for DialogContent. Non-blocking."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Catalogue.jsx currentOffer() falls back to prix_achat_ht/fournisseur_retenu when no explicit chosen — good default. If prix_achat_ht is null (a_completer) and offers empty, returns fournisseur_retenu with null price and disables the '+' button (co.prix_ht == null) — correct.",
+    "Dropdown cell uses onClick stopPropagation on the <td>, verified via test: opening the Select and picking Rexel does NOT open article-detail-dialog. Row click on other cells still opens dialog.",
+    "getOffers dedupes by supplier keeping min price. Sorted ascending. But the initial `chosen` state is empty, so currentOffer defaults to (fournisseur_retenu, prix_achat_ht) which may NOT be the cheapest offer (e.g. CFA-002 default = Au Forum 152.80€ even though Rexel is 1.05€). This is intentional per spec ('prix retenu' by default) — flagged only for awareness.",
+    "add-article-to-estimate-btn logic: if chosen[a.code] set → addOffer(a, currentOffer); else addItem(a). Basket line composite code (e.g. 'ELE-001@Rexel') keeps items separable by supplier. Confirmed on /estimateur two lines with correct fournisseur + prix (8.78€ Rexel and 1.05€ Rexel)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "None. Cleared localStorage bst_estimate_basket at end of test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 5 covers only the catalogue supplier picker + livraison column. Live evidence: ELE-001 dropdown ['Au Forum du Bâtiment · 8,46 €', 'Rexel · 8,78 €'] — switching to Rexel changes row to '8,78 €/u' and retrait 'Retrait agence · Livraison selon agence'. CFA-002 dropdown ['Rexel · 1,05 €', 'Au Forum du Bâtiment · 152,80 €'] — switching to Rexel changes row to '1,05 €/ml'. CFA-001 shows no dropdown, '— à renseigner —' and '—'. Basket after adds: [{code:'ELE-001@Rexel', fournisseur:'Rexel', prix_achat_ht:8.78}, {code:'CFA-002@Rexel', fournisseur:'Rexel', prix_achat_ht:1.05}]. On /estimateur both lines display with 'Rexel' in Fournisseur column and correct prices.",
+  "rca of the issue": "N/A — no bugs found."
+}

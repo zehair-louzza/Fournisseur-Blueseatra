@@ -85,7 +85,9 @@ for r in rows[1:]:
         'designation': clean(r[10]),
         'marque': clean(r[11]),
         'ref_fournisseur': clean(r[12]),
+        'unite_vente': clean(r[13]),
         'conditionnement': clean(r[14]),
+        'retrait': clean(r[15]),
         'fiabilite': clean(r[16]),
         'rang': num(r[19]),
     }
