@@ -1,0 +1,27 @@
+{
+  "summary": "Iteration 4 targeted retest on Estimateur: verified POST /api/best-prices backend endpoint, 'Meilleur prix auto' button (best-price-auto-btn), 'Par fournisseur' grouping dialog (group-supplier-btn / group-supplier-dialog), and non-regression on Fournisseur column + marge/TVA/TTC recomputation. All 3 scenarios PASSED.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "group-supplier-dialog & other Radix dialogs", "issues": ["Console a11y warning: Missing `Description` or `aria-describedby` for DialogContent. Non-blocking (already noted iter 3)."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Optional a11y polish: add <DialogDescription> to Estimateur dialogs (group-supplier-dialog, save/load) to silence Radix warnings."
+  ],
+  "critical_code_review_comments": [
+    "server.py POST /api/best-prices correctly excludes _id, iterates over offers + prix_achat_ht seed, returns rounded prix. Handles empty codes and unknown codes gracefully (returns {}).",
+    "Estimateur.applyBestPrices only switches when best.prix < current line's prix_achat_ht — correct guard preventing needless swaps (composite-keyed lines from Catalogue 'Produits examinés' with an already-cheaper offer won't regress).",
+    "parFournisseur useMemo groups on li.fournisseur, sorts by total desc — correct. Group data-testid uses raw supplier name with spaces (e.g. 'group-Au Forum du Bâtiment') — works but could sanitize."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (/api/best-prices verified with 4 codes + empty + unknown)", "frontend": "100%"},
+  "seed_data_creation": "None. Cleaned localStorage bst_estimate_basket at end.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 4 validated Estimateur new features end-to-end. Backend POST /api/best-prices {codes:[...]} returns {code:{fournisseur,prix}}. Live evidence with CFA-005/ELE-006/PLB-039/CFA-002: only CFA-002 switched from 'Au Forum du Bâtiment' 152.80€ → 'Rexel' 1.05€ (others already at min). Toast: '1 ligne(s) basculée(s) au meilleur prix — économie 151,75 € sur l'achat'. Totals recomputed: Total achat 387.86€, Vente HT 517.15€ (marge 25%), TVA 103.43€ (20%), TTC 620.58€ — all mathematically consistent. group-supplier-dialog rendered 2 groups (Au Forum du Bâtiment 339.76€ / Rexel 48.10€) with 'quantité × prix achat' per line and global 'Total achat HT' 387.86€ matching récap. Fournisseur column present in main table.",
+  "rca of the issue": "N/A — no bugs found."
+}

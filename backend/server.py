@@ -427,7 +427,7 @@ async def comparateur():
         total_eco += eco
         eco_pcts.append(eco_pct)
         items.append({
-            "code": a["code"], "article": a["article"], "lot": a["lot"],
+            "code": a["code"], "article": a["article"], "lot": a["lot"], "unite": a.get("unite"),
             "prix": prix, "nb_offres": len(prix),
             "best_fournisseur": best_f, "best_prix": best_p, "worst_prix": round(worst_p, 2),
             "economie_eur": round(eco, 2), "economie_pct": round(eco_pct, 1),
@@ -469,6 +469,29 @@ async def import_catalogue(file: UploadFile = File(...)):
             await db[name].delete_many({})
             await db[name].insert_many([dict(d) for d in docs])
     return {"updated": updated, "added": added, "total": len(arts)}
+
+
+class CodesBody(BaseModel):
+    codes: List[str]
+
+
+@api_router.post("/best-prices")
+async def best_prices(body: CodesBody):
+    out = {}
+    arts = await db.articles.find(
+        {"code": {"$in": body.codes}},
+        {"_id": 0, "code": 1, "offers": 1, "prix_achat_ht": 1, "fournisseur_retenu": 1},
+    ).to_list(2000)
+    for a in arts:
+        best_p = a.get("prix_achat_ht")
+        best_f = a.get("fournisseur_retenu")
+        for o in a.get("offers", []):
+            p = o.get("prix_ht")
+            if p is not None and (best_p is None or p < best_p):
+                best_p, best_f = p, o.get("fournisseur")
+        if best_p is not None:
+            out[a["code"]] = {"fournisseur": best_f, "prix": round(best_p, 2)}
+    return out
 
 
 app.include_router(api_router)

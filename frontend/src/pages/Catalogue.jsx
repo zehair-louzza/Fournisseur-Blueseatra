@@ -211,7 +211,7 @@ export default function Catalogue() {
                   <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{lotLabel(a.lot)}</td>
                   <td className="px-3 py-2.5 text-xs whitespace-nowrap">{a.fournisseur_retenu || "—"}</td>
                   <td className="px-3 py-2.5 text-right font-mono font-semibold tabular-nums whitespace-nowrap">
-                    {a.prix_achat_ht ? eur(a.prix_achat_ht) : <span className="text-muted-foreground">—</span>}
+                    {a.prix_achat_ht ? (<>{eur(a.prix_achat_ht)}{a.unite && <span className="ml-0.5 text-[11px] font-normal text-muted-foreground">/{a.unite}</span>}</>) : <span className="text-muted-foreground">—</span>}
                   </td>
                   <td className="px-3 py-2.5 text-center"><StatutBadge statut={a.statut} small /></td>
                   <td className="px-4 py-2.5 text-right">
@@ -289,6 +289,7 @@ export default function Catalogue() {
                   <p className="text-xs text-muted-foreground">Prix achat HT retenu</p>
                   <p className="font-mono text-2xl font-extrabold tabular-nums">
                     {detail.prix_achat_ht ? eur(detail.prix_achat_ht) : "—"}
+                    {detail.prix_achat_ht && detail.unite && <span className="ml-1 text-sm font-normal text-muted-foreground">/{detail.unite}</span>}
                   </p>
                 </div>
                 <button
@@ -320,7 +321,7 @@ export default function Catalogue() {
                           <tr key={i} className="border-t border-border/40">
                             <td className="px-3 py-2">{o.fournisseur}</td>
                             <td className="px-3 py-2 text-xs text-muted-foreground">{o.type_prix}</td>
-                            <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums">{eur(o.prix_ht)}</td>
+                            <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap">{eur(o.prix_ht)}{detail.unite && <span className="ml-0.5 text-[11px] font-normal text-muted-foreground">/{detail.unite}</span>}</td>
                             <td className="px-3 py-2 text-right">
                               <button data-testid={`use-offer-btn-${i}`} disabled={!o.prix_ht}
                                 onClick={() => addOffer(detail, o)}

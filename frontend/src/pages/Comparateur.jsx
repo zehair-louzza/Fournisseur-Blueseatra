@@ -100,6 +100,7 @@ export default function Comparateur() {
             <thead>
               <tr className="border-b border-border/60 bg-secondary/40 text-xs uppercase text-muted-foreground">
                 <th className="sticky left-0 z-10 bg-secondary/60 px-4 py-3 text-left font-medium backdrop-blur-sm">Article</th>
+                <th className="px-3 py-3 text-left font-medium">Unité</th>
                 {data.fournisseurs.map((f) => (
                   <th key={f} className="px-3 py-3 text-right font-medium whitespace-nowrap" title={f}>{shortName(f)}</th>
                 ))}
@@ -108,7 +109,7 @@ export default function Comparateur() {
             </thead>
             <tbody>
               {rows.length === 0 && (
-                <tr><td colSpan={data.fournisseurs.length + 2} className="px-4 py-12 text-center text-muted-foreground">Aucun article comparable.</td></tr>
+                <tr><td colSpan={data.fournisseurs.length + 3} className="px-4 py-12 text-center text-muted-foreground">Aucun article comparable.</td></tr>
               )}
               {rows.map((r) => (
                 <tr key={r.code} data-testid={`comparateur-row-${r.code}`} onClick={() => openDetail(r.code)}
@@ -117,6 +118,7 @@ export default function Comparateur() {
                     <p className="font-medium truncate">{r.article}</p>
                     <p className="text-xs text-muted-foreground truncate">{lotLabel(r.lot)} · {r.nb_offres} offres</p>
                   </td>
+                  <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{r.unite || "—"}</td>
                   {data.fournisseurs.map((f) => {
                     const p = r.prix[f];
                     const isBest = p != null && p === r.best_prix;
@@ -191,7 +193,7 @@ export default function Comparateur() {
                             </span>
                           </td>
                           <td className="px-3 py-2 text-xs text-muted-foreground">{o.type_prix || "—"}</td>
-                          <td className={`px-3 py-2 text-right font-mono font-semibold tabular-nums ${i === 0 ? "text-emerald-600 dark:text-emerald-400" : ""}`}>{eur(o.prix_ht)}</td>
+                          <td className={`px-3 py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${i === 0 ? "text-emerald-600 dark:text-emerald-400" : ""}`}>{eur(o.prix_ht)}{detail.unite && <span className="ml-0.5 text-[11px] font-normal text-muted-foreground">/{detail.unite}</span>}</td>
                         </tr>
                       ))}
                     </tbody>

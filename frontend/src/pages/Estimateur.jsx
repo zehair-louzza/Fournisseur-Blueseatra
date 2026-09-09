@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   Calculator, Trash2, Save, FolderOpen, Plus, ShoppingCart, X, FileText, Percent,
-  PieChart as PieIcon, Receipt, Layers,
+  PieChart as PieIcon, Receipt, Layers, Wand2, Truck,
 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { toast } from "sonner";
@@ -80,6 +80,51 @@ export default function Estimateur() {
     setItems(items.map((i) => (i.lot === lot ? { ...i, marge_pct: m } : i)));
     toast.success(`Marge ${m}% appliquée au lot ${lotLabel(lot)}`);
   };
+
+  const [openGroup, setOpenGroup] = useState(false);
+  const [bestLoading, setBestLoading] = useState(false);
+
+  const applyBestPrices = async () => {
+    if (!items.length) return;
+    setBestLoading(true);
+    try {
+      const codes = [...new Set(items.map((i) => i.code.split("@")[0]))];
+      const best = await api.bestPrices(codes);
+      let changed = 0;
+      let saved = 0;
+      const next = items.map((i) => {
+        const b = best[i.code.split("@")[0]];
+        if (b && b.prix != null && b.prix < i.prix_achat_ht) {
+          saved += (i.prix_achat_ht - b.prix) * (Number(i.quantite) || 0);
+          changed += 1;
+          return { ...i, prix_achat_ht: b.prix, fournisseur: b.fournisseur };
+        }
+        return i;
+      });
+      setItems(next);
+      toast.success(
+        changed
+          ? `${changed} ligne(s) basculée(s) au meilleur prix — économie ${eur(saved)} sur l'achat`
+          : "Toutes les lignes sont déjà au meilleur prix"
+      );
+    } catch {
+      toast.error("Impossible de récupérer les meilleurs prix");
+    } finally {
+      setBestLoading(false);
+    }
+  };
+
+  const parFournisseur = useMemo(() => {
+    const groups = {};
+    items.forEach((li) => {
+      const f = li.fournisseur || "Non défini";
+      if (!groups[f]) groups[f] = { fournisseur: f, lignes: [], total: 0 };
+      const total = (Number(li.prix_achat_ht) || 0) * (Number(li.quantite) || 0);
+      groups[f].lignes.push({ ...li, total_achat: total });
+      groups[f].total += total;
+    });
+    return Object.values(groups).sort((a, b) => b.total - a.total);
+  }, [items]);
 
   const saveProject = async () => {
     if (!meta.nom.trim()) { toast.error("Donnez un nom au projet"); return; }
@@ -188,6 +233,14 @@ export default function Estimateur() {
                 }`}>
                 <Layers className="h-4 w-4 text-accent" /> Marge par lot
               </button>
+              <button data-testid="best-price-auto-btn" onClick={applyBestPrices} disabled={bestLoading}
+                className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm hover:bg-secondary transition-colors disabled:opacity-60">
+                <Wand2 className="h-4 w-4 text-accent" /> {bestLoading ? "Recherche…" : "Meilleur prix auto"}
+              </button>
+              <button data-testid="group-supplier-btn" onClick={() => setOpenGroup(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm hover:bg-secondary transition-colors">
+                <Truck className="h-4 w-4 text-accent" /> Par fournisseur
+              </button>
               <button onClick={clear} data-testid="clear-basket-btn"
                 className="ml-auto flex items-center gap-1 text-sm text-muted-foreground hover:text-rose-500 transition-colors">
                 <X className="h-4 w-4" /> Vider
@@ -213,6 +266,7 @@ export default function Estimateur() {
                   <thead>
                     <tr className="border-b border-border/60 bg-secondary/40 text-xs uppercase text-muted-foreground">
                       <th className="px-3 py-2.5 text-left font-medium">Article</th>
+                      <th className="px-2 py-2.5 text-left font-medium">Fournisseur</th>
                       <th className="px-2 py-2.5 text-right font-medium">Achat HT</th>
                       <th className="px-2 py-2.5 text-center font-medium">Marge %</th>
                       <th className="px-2 py-2.5 text-center font-medium">Qté</th>
@@ -233,6 +287,7 @@ export default function Estimateur() {
                             <p className="font-medium truncate">{li.article}</p>
                             <p className="text-xs text-muted-foreground truncate">{lotLabel(li.lot)} · {li.unite || "u"}</p>
                           </td>
+                          <td className="px-2 py-2.5 text-xs text-muted-foreground max-w-[110px] truncate" title={li.fournisseur}>{li.fournisseur || "—"}</td>
                           <td className="px-2 py-2.5 text-right font-mono tabular-nums whitespace-nowrap">{eur(li.prix_achat_ht)}</td>
                           <td className="px-2 py-2.5 text-center">
                             <input data-testid={`marge-input-${li.code}`} type="number" value={li.marge_pct}
@@ -323,6 +378,44 @@ export default function Estimateur() {
           </div>
         </div>
       )}
+
+      <Dialog open={openGroup} onOpenChange={setOpenGroup}>
+        <DialogContent data-testid="group-supplier-dialog" className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display">Commandes par fournisseur</DialogTitle>
+          </DialogHeader>
+          <p className="-mt-2 text-xs text-muted-foreground">
+            Regroupement des lignes du devis par enseigne (montants en prix d'achat HT), pour préparer vos bons de commande.
+          </p>
+          <div className="space-y-4">
+            {parFournisseur.map((g) => (
+              <div key={g.fournisseur} data-testid={`group-${g.fournisseur}`} className="rounded-xl border border-border/70 overflow-hidden">
+                <div className="flex items-center justify-between bg-secondary/50 px-4 py-2.5">
+                  <span className="flex items-center gap-2 font-medium"><Truck className="h-4 w-4 text-accent" />{g.fournisseur}</span>
+                  <span className="font-mono font-semibold tabular-nums">{eur(g.total)}</span>
+                </div>
+                <table className="w-full text-sm">
+                  <tbody>
+                    {g.lignes.map((li) => (
+                      <tr key={li.code} className="border-t border-border/40">
+                        <td className="px-4 py-2">{li.article}</td>
+                        <td className="px-2 py-2 text-right font-mono tabular-nums whitespace-nowrap text-muted-foreground">{li.quantite} × {eur(li.prix_achat_ht)}</td>
+                        <td className="px-4 py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap">{eur(li.total_achat)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+            <div className="flex items-center justify-between rounded-lg bg-secondary/60 px-4 py-3">
+              <span className="font-display font-semibold">Total achat HT</span>
+              <span className="font-mono text-xl font-extrabold tabular-nums text-accent">
+                {eur(parFournisseur.reduce((s, g) => s + g.total, 0))}
+              </span>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Save dialog */}
       <Dialog open={openSave} onOpenChange={setOpenSave}>
