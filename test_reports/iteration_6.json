@@ -1,0 +1,24 @@
+{
+  "summary": "Iteration 6 targeted testing: new /api/stats/decision endpoint + enriched /api/stats/overview + rewritten Dashboard (decision-support). Backend: 22/22 pytest passed including 3 new tests (overview enriched, decision, decision_vs_overview). Values match spec: total_articles=397, economie_fiable=23264 (fiable-only) < economie_potentielle=31218 (brute), nb_comparables_fiable=196, 3 dispo segments. Frontend: 4 KPIs render (kpi-total-articles=397, kpi-economie-fiable='23 264 €', kpi-valeur='23 947 €', kpi-alertes=159), 12 opp-row-* rows present, clicking opp-row-PLB-039 navigates to /comparateur, 16 reco-lot-* cards, 16 dashboard-lot-row-* rows, both donuts + bar chart render, EUR fr-FR format OK. No runtime overlay/pageerror; only benign Recharts initial-size warnings.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard", "issues": ["Recharts logs a benign console warning about width/height(-1) during first paint of ResponsiveContainer; non-blocking but could be silenced by giving explicit width/height to the outer container."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/iteration_6.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is ~610 lines and growing; consider splitting into routers (catalogue, stats, projects, imports) for maintainability.",
+    "Two full scans of articles collection happen for /stats/overview and /stats/decision on every request (find({}).to_list(2000)); acceptable at 397 docs but should be cached or aggregated server-side if catalogue grows.",
+    "Dashboard fetches 3 endpoints sequentially without a loading/error state (only '…' placeholder). Errors from api.decision() are silently swallowed."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "None (used existing seeded 397 articles).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 6 scope was Dashboard + /api/stats/decision + enriched /api/stats/overview. All previously validated pages (Catalogue/Comparateur/Estimateur/Alertes/Fournisseurs) were NOT retested per request. Full pytest suite (22 tests) still green so no regression."
+}

@@ -249,3 +249,62 @@ def test_import_catalogue_bad_file():
     files = {"file": ("bad.xlsx", b"not-an-xlsx", "application/octet-stream")}
     r = requests.post(f"{API}/catalogue/import", files=files, timeout=30)
     assert r.status_code == 400
+
+
+
+# ---------- Stats decision (Iteration 6) ----------
+def test_stats_overview_enriched(s):
+    r = s.get(f"{API}/stats/overview", timeout=15)
+    assert r.status_code == 200
+    d = r.json()
+    for k in ["valeur_meilleur_prix", "economie_potentielle", "disponibilite",
+              "total_offres", "nb_comparables"]:
+        assert k in d, f"missing {k}"
+    assert d["total_articles"] == 397, f"expected 397 articles, got {d['total_articles']}"
+    assert isinstance(d["disponibilite"], list)
+    names = [x["name"] for x in d["disponibilite"]]
+    # 3 segments expected
+    assert len(d["disponibilite"]) == 3, f"expected 3 dispo segments, got {names}"
+    for x in d["disponibilite"]:
+        assert x["value"] > 0
+    assert d["valeur_meilleur_prix"] > 0
+    assert d["economie_potentielle"] > 0
+    print("overview enriched:", {k: d[k] for k in ["valeur_meilleur_prix", "economie_potentielle", "nb_comparables", "total_offres"]})
+
+
+def test_stats_decision(s):
+    r = s.get(f"{API}/stats/decision", timeout=30)
+    assert r.status_code == 200
+    d = r.json()
+    for k in ["economie_fiable", "nb_comparables_fiable", "top_opportunites", "reco_par_lot"]:
+        assert k in d, f"missing {k}"
+    assert isinstance(d["economie_fiable"], (int, float))
+    assert isinstance(d["nb_comparables_fiable"], int)
+    assert isinstance(d["top_opportunites"], list)
+    assert 0 < len(d["top_opportunites"]) <= 12
+    # sorted desc by economie_eur
+    ecos = [x["economie_eur"] for x in d["top_opportunites"]]
+    assert ecos == sorted(ecos, reverse=True)
+    # each item shape
+    for it in d["top_opportunites"]:
+        for k in ["code", "article", "lot", "unite", "best_fournisseur",
+                  "best_prix", "worst_prix", "economie_eur", "economie_pct"]:
+            assert k in it, f"missing opp field {k}"
+    # reco par lot
+    assert isinstance(d["reco_par_lot"], list) and len(d["reco_par_lot"]) > 0
+    for r_ in d["reco_par_lot"]:
+        for k in ["lot", "fournisseur", "wins", "total"]:
+            assert k in r_
+        assert r_["wins"] <= r_["total"]
+    print(f"decision: eco_fiable={d['economie_fiable']} nb_fiable={d['nb_comparables_fiable']} reco_lots={len(d['reco_par_lot'])}")
+
+
+def test_decision_vs_overview_economy(s):
+    """economie_fiable must be <= economie_potentielle brute (only fiable statut counted)."""
+    ov = s.get(f"{API}/stats/overview", timeout=15).json()
+    dec = s.get(f"{API}/stats/decision", timeout=30).json()
+    assert dec["economie_fiable"] < ov["economie_potentielle"], (
+        f"economie_fiable ({dec['economie_fiable']}) should be < economie_potentielle ({ov['economie_potentielle']})"
+    )
+    # ~23264 fiable vs ~31218 potential from problem statement (allow drift)
+    print(f"eco_fiable={dec['economie_fiable']} vs eco_potentielle={ov['economie_potentielle']}")

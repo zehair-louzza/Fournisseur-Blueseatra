@@ -40,6 +40,10 @@
 - **Prix examiné → estimation** : bouton « Utiliser » sur chaque offre examinée (dialog détail) ajoute ce prix précis au panier (clé composite `code@fournisseur`).
 - Tests : backend 19/19 pytest ; frontend itérations 2-3 100%. Bug « F is not defined » (comparateur) corrigé.
 
+## Dashboard décisionnel (itération 6, 2026-06)
+- `/api/stats/decision` : économie **fiable** (exclut les « à vérifier »), top opportunités, fournisseur recommandé par lot.
+- Dashboard réorienté « aide au choix » : KPI économie fiable, Top opportunités cliquables → comparateur, Fournisseur recommandé par lot, donuts Fiabilité + Disponibilité.
+
 ## Backlog (P1/P2)
 - Export PDF/Excel des devis (P1).
 - Comparateur de prix multi-fournisseurs par article dédié (P2).

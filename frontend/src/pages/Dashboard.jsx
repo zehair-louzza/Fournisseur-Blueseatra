@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
@@ -6,24 +7,25 @@ import {
 } from "recharts";
 import {
   Package, Wallet, ShieldCheck, AlertTriangle, Layers3, Truck, TrendingUp, CircleDashed,
-  Boxes, TrendingDown,
+  TrendingDown, Target, Award, ArrowRight, Trophy,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import { eur, num, pct, lotLabel } from "@/lib/format";
+import { eur, num, lotLabel } from "@/lib/format";
 import { LOT_PALETTE } from "@/lib/colors";
 import { KpiCard } from "@/components/KpiCard";
 
 const DISPO_COLORS = { "Retrait agence": "#10b981", "Sur commande": "#f59e0b", "Autre / à préciser": "#94a3b8" };
 
 export default function Dashboard() {
+  const nav = useNavigate();
   const [ov, setOv] = useState(null);
   const [byLot, setByLot] = useState([]);
-  const [bySupplier, setBySupplier] = useState([]);
+  const [dec, setDec] = useState(null);
 
   useEffect(() => {
     api.overview().then(setOv);
     api.byLot().then(setByLot);
-    api.bySupplier().then(setBySupplier);
+    api.decision().then(setDec);
   }, []);
 
   const lotBar = byLot
@@ -38,7 +40,6 @@ export default function Dashboard() {
       ]
     : [];
 
-  const supplierBar = [...bySupplier].sort((a, b) => b.articles - a.articles);
   const dispoPie = ov?.disponibilite || [];
 
   return (
@@ -63,15 +64,15 @@ export default function Dashboard() {
         <KpiCard testid="kpi-total-articles" index={0} label="Articles au catalogue"
           value={ov ? num(ov.total_articles) : "…"} Icon={Package} accent="blue"
           sub={ov ? `${ov.nb_lots} lots · ${ov.nb_fournisseurs} fournisseurs` : ""} />
-        <KpiCard testid="kpi-offres" index={1} label="Offres fournisseurs relevées"
-          value={ov ? num(ov.total_offres) : "…"} Icon={Boxes} accent="slate"
-          sub={ov ? `${num(ov.nb_comparables)} articles multi-fournisseurs` : ""} />
+        <KpiCard testid="kpi-economie-fiable" index={1} label="Économie fiable identifiée"
+          value={dec ? eur(dec.economie_fiable, { max: 0 }) : "…"} Icon={TrendingDown} accent="emerald"
+          sub={dec ? `sur ${num(dec.nb_comparables_fiable)} articles fiables comparés` : ""} />
         <KpiCard testid="kpi-valeur" index={2} label="Valeur au meilleur prix"
           value={ov ? eur(ov.valeur_meilleur_prix, { max: 0 }) : "…"} Icon={Wallet} accent="amber"
           sub={ov ? `Catalogue retenu ${eur(ov.valeur_catalogue, { max: 0 })}` : ""} />
-        <KpiCard testid="kpi-economie" index={3} label="Économie potentielle"
-          value={ov ? eur(ov.economie_potentielle, { max: 0 }) : "…"} Icon={TrendingDown} accent="emerald"
-          sub={ov ? `en choisissant le moins cher` : ""} />
+        <KpiCard testid="kpi-alertes" index={3} label="Articles à traiter"
+          value={ov ? num(ov.a_completer + ov.a_verifier) : "…"} Icon={AlertTriangle} accent="rose"
+          sub={ov ? `${ov.a_completer} à compléter · ${ov.a_verifier} à vérifier` : ""} />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -133,29 +134,52 @@ export default function Dashboard() {
         </motion.div>
       </div>
 
-      {/* Suppliers + availability row */}
+      {/* Decision: top opportunités + disponibilité */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-          className="rounded-xl border border-border/70 bg-card p-5 lg:col-span-2">
-          <div className="flex items-center gap-2 mb-4">
-            <Truck className="h-4 w-4 text-accent" />
-            <h2 className="font-display text-lg font-semibold">Articles retenus par fournisseur</h2>
+          className="rounded-xl border border-border/70 bg-card overflow-hidden lg:col-span-2">
+          <div className="flex items-center gap-2 p-5 pb-3">
+            <Target className="h-4 w-4 text-accent" />
+            <h2 className="font-display text-lg font-semibold">Top opportunités d'achat</h2>
+            <span className="ml-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">prix fiables</span>
           </div>
-          <div className="h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={supplierBar} margin={{ left: 0, right: 8, bottom: 50 }}>
-                <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
-                <XAxis dataKey="fournisseur" angle={-25} textAnchor="end" height={70} interval={0}
-                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
-                <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                <Tooltip cursor={{ fill: "hsl(var(--secondary))" }}
-                  contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
-                  formatter={(v, n) => [num(v), n === "articles" ? "Articles" : n]} />
-                <Bar dataKey="articles" radius={[4, 4, 0, 0]}>
-                  {supplierBar.map((_, i) => <Cell key={i} fill={LOT_PALETTE[i % LOT_PALETTE.length]} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-y border-border/60 bg-secondary/40 text-xs uppercase text-muted-foreground">
+                  <th className="px-5 py-2.5 text-left font-medium">Article</th>
+                  <th className="px-3 py-2.5 text-left font-medium">Meilleur fournisseur</th>
+                  <th className="px-3 py-2.5 text-right font-medium">Prix mini</th>
+                  <th className="px-5 py-2.5 text-right font-medium">Économie</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(dec?.top_opportunites || []).map((o) => (
+                  <tr key={o.code} data-testid={`opp-row-${o.code}`} onClick={() => nav("/comparateur")}
+                    className="cursor-pointer border-b border-border/40 last:border-0 hover:bg-secondary/40 transition-colors">
+                    <td className="px-5 py-2.5 max-w-[240px]">
+                      <p className="font-medium truncate">{o.article}</p>
+                      <p className="text-xs text-muted-foreground truncate">{lotLabel(o.lot)}</p>
+                    </td>
+                    <td className="px-3 py-2.5 text-xs">
+                      <span className="inline-flex items-center gap-1.5"><Trophy className="h-3.5 w-3.5 text-amber-500" />{o.best_fournisseur}</span>
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-mono font-semibold tabular-nums whitespace-nowrap text-emerald-600 dark:text-emerald-400">
+                      {eur(o.best_prix)}{o.unite && <span className="ml-0.5 text-[11px] font-normal text-muted-foreground">/{o.unite}</span>}
+                    </td>
+                    <td className="px-5 py-2.5 text-right whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1 font-mono font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                        −{eur(o.economie_eur)}
+                        <span className="ml-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[11px]">{o.economie_pct}%</span>
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center justify-end gap-1 p-3 text-xs text-muted-foreground">
+            Ouvrir le comparateur <ArrowRight className="h-3 w-3" />
           </div>
         </motion.div>
 
@@ -171,8 +195,7 @@ export default function Dashboard() {
                 <Pie data={dispoPie} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={3} isAnimationActive={false}>
                   {dispoPie.map((s, i) => <Cell key={i} fill={DISPO_COLORS[s.name] || LOT_PALETTE[i]} />)}
                 </Pie>
-                <Tooltip
-                  contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }} />
+                <Tooltip contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }} />
               </PieChart>
             </ResponsiveContainer>
           </div>
@@ -189,6 +212,25 @@ export default function Dashboard() {
           </div>
         </motion.div>
       </div>
+
+      {/* Fournisseur recommandé par lot */}
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+        className="rounded-xl border border-border/70 bg-card p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <Award className="h-4 w-4 text-accent" />
+          <h2 className="font-display text-lg font-semibold">Fournisseur recommandé par lot</h2>
+          <span className="text-xs text-muted-foreground">(le plus souvent le moins cher)</span>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {(dec?.reco_par_lot || []).map((r, i) => (
+            <div key={r.lot} data-testid={`reco-lot-${i}`} className="rounded-lg border border-border/60 bg-background p-3">
+              <p className="text-xs text-muted-foreground truncate" title={r.lot}>{r.lot}</p>
+              <p className="mt-1 flex items-center gap-1.5 font-medium truncate"><Trophy className="h-4 w-4 shrink-0 text-amber-500" />{r.fournisseur}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">moins cher sur {r.wins}/{r.total} articles comparés</p>
+            </div>
+          ))}
+        </div>
+      </motion.div>
 
       {/* Lot table */}
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}

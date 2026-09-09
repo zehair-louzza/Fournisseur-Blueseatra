@@ -541,6 +541,57 @@ async def best_prices(body: CodesBody):
     return out
 
 
+@api_router.get("/stats/decision")
+async def stats_decision():
+    arts = await db.articles.find(
+        {},
+        {"_id": 0, "code": 1, "article": 1, "lot": 1, "unite": 1, "statut": 1,
+         "offers": 1, "prix_achat_ht": 1, "fournisseur_retenu": 1},
+    ).to_list(2000)
+    economie_fiable = 0.0
+    opp = []
+    lot_wins = {}
+    lot_total = {}
+    for a in arts:
+        best_by = {}
+        for o in a.get("offers", []):
+            p = o.get("prix_ht")
+            if p is None:
+                continue
+            f = o["fournisseur"]
+            if f not in best_by or p < best_by[f]:
+                best_by[f] = p
+        if len(best_by) < 2:
+            continue
+        ranked = sorted(best_by.items(), key=lambda x: x[1])
+        best_f, best_p = ranked[0]
+        worst_p = ranked[-1][1]
+        eco = worst_p - best_p
+        lot = a.get("lot") or "Autre"
+        lot_wins.setdefault(lot, {})
+        lot_wins[lot][best_f] = lot_wins[lot].get(best_f, 0) + 1
+        lot_total[lot] = lot_total.get(lot, 0) + 1
+        if a.get("statut") == "fiable":
+            economie_fiable += eco
+            opp.append({
+                "code": a["code"], "article": a["article"], "lot": lot, "unite": a.get("unite"),
+                "best_fournisseur": best_f, "best_prix": round(best_p, 2), "worst_prix": round(worst_p, 2),
+                "economie_eur": round(eco, 2), "economie_pct": round(eco / worst_p * 100, 1) if worst_p else 0,
+            })
+    opp.sort(key=lambda x: x["economie_eur"], reverse=True)
+    reco = []
+    for lot, wins in lot_wins.items():
+        f = max(wins, key=wins.get)
+        reco.append({"lot": lot, "fournisseur": f, "wins": wins[f], "total": lot_total[lot]})
+    reco.sort(key=lambda x: x["lot"])
+    return {
+        "economie_fiable": round(economie_fiable, 2),
+        "nb_comparables_fiable": len(opp),
+        "top_opportunites": opp[:12],
+        "reco_par_lot": reco,
+    }
+
+
 app.include_router(api_router)
 
 app.add_middleware(

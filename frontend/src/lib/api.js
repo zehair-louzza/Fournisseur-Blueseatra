@@ -12,6 +12,7 @@ export const api = {
   overview: () => client.get("/stats/overview").then((r) => r.data),
   byLot: () => client.get("/stats/by-lot").then((r) => r.data),
   bySupplier: () => client.get("/stats/by-supplier").then((r) => r.data),
+  decision: () => client.get("/stats/decision").then((r) => r.data),
   comparateur: () => client.get("/comparateur").then((r) => r.data),
   importCatalogue: (formData) =>
     client.post("/catalogue/import", formData, { headers: { "Content-Type": "multipart/form-data" } }).then((r) => r.data),
