@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Scale, TrendingDown, Search, Trophy } from "lucide-react";
+import { Scale, TrendingDown, Search, Trophy, ExternalLink } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import { eur, pct, lotLabel } from "@/lib/format";
@@ -121,6 +121,7 @@ export default function Comparateur() {
                   <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{r.unite || "—"}</td>
                   {data.fournisseurs.map((f) => {
                     const p = r.prix[f];
+                    const fiche = r.fiches?.[f];
                     const isBest = p != null && p === r.best_prix;
                     return (
                       <td key={f} className={`px-3 py-2.5 text-right font-mono tabular-nums whitespace-nowrap ${
@@ -128,7 +129,13 @@ export default function Comparateur() {
                           : isBest ? "font-bold text-emerald-600 dark:text-emerald-400"
                           : "text-foreground"
                       }`}>
-                        {p == null ? "—" : (
+                        {p == null ? "—" : fiche ? (
+                          <a href={fiche} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+                            data-testid={`fiche-link-${r.code}-${f}`} title={`Voir la fiche produit chez ${f}`}
+                            className="inline-flex items-center justify-end gap-1 hover:underline decoration-dotted underline-offset-2">
+                            {isBest && <Trophy className="h-3 w-3 text-amber-500" />}{eur(p)}<ExternalLink className="h-3 w-3 opacity-50" />
+                          </a>
+                        ) : (
                           <span className="inline-flex items-center justify-end gap-1">
                             {isBest && <Trophy className="h-3 w-3 text-amber-500" />}{eur(p)}
                           </span>
@@ -193,7 +200,15 @@ export default function Comparateur() {
                             </span>
                           </td>
                           <td className="px-3 py-2 text-xs text-muted-foreground">{o.type_prix || "—"}</td>
-                          <td className={`px-3 py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${i === 0 ? "text-emerald-600 dark:text-emerald-400" : ""}`}>{eur(o.prix_ht)}{detail.unite && <span className="ml-0.5 text-[11px] font-normal text-muted-foreground">/{detail.unite}</span>}</td>
+                          <td className={`px-3 py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${i === 0 ? "text-emerald-600 dark:text-emerald-400" : ""}`}>
+                            {o.fiche_produit ? (
+                              <a href={o.fiche_produit} target="_blank" rel="noreferrer" title={`Fiche produit chez ${o.fournisseur}`}
+                                className="inline-flex items-center gap-1 hover:underline decoration-dotted underline-offset-2">
+                                {eur(o.prix_ht)}<ExternalLink className="h-3 w-3 opacity-50" />
+                              </a>
+                            ) : eur(o.prix_ht)}
+                            {detail.unite && <span className="ml-0.5 text-[11px] font-normal text-muted-foreground">/{detail.unite}</span>}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

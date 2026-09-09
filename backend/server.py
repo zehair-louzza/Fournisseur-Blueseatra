@@ -455,6 +455,7 @@ async def comparateur():
     seen = set()
     for a in arts:
         prix = {}
+        fiches = {}
         for o in a.get("offers", []):
             if not o.get("prix_ht"):
                 continue
@@ -462,6 +463,7 @@ async def comparateur():
             p = round(o["prix_ht"], 2)
             if f not in prix or p < prix[f]:
                 prix[f] = p
+                fiches[f] = o.get("fiche_produit")
         if len(prix) < 2:
             continue
         for f in prix:
@@ -475,7 +477,7 @@ async def comparateur():
         eco_pcts.append(eco_pct)
         items.append({
             "code": a["code"], "article": a["article"], "lot": a["lot"], "unite": a.get("unite"),
-            "prix": prix, "nb_offres": len(prix),
+            "prix": prix, "fiches": {k: v for k, v in fiches.items() if v}, "nb_offres": len(prix),
             "best_fournisseur": best_f, "best_prix": best_p, "worst_prix": round(worst_p, 2),
             "economie_eur": round(eco, 2), "economie_pct": round(eco_pct, 1),
         })

@@ -79,10 +79,18 @@ def parse_catalogue(content: bytes) -> dict:
 
     if "Base articles" in wb.sheetnames:
         ws = wb["Base articles"]
-        for r in list(ws.iter_rows(values_only=True))[1:]:
-            code = _clean(r[0])
+        for row in ws.iter_rows(min_row=2):
+            r = [c.value for c in row]
+            code = _clean(r[0]) if len(r) > 0 else None
             if not code or code not in by_code:
                 continue
+            fiche_url = None
+            if len(row) > 17 and row[17] is not None:
+                hl = row[17].hyperlink
+                if hl and hl.target:
+                    fiche_url = hl.target
+                elif isinstance(row[17].value, str) and row[17].value.startswith("http"):
+                    fiche_url = row[17].value
             offer = {
                 "fournisseur": _clean(r[5]),
                 "type_prix": _clean(r[6]),
@@ -96,6 +104,7 @@ def parse_catalogue(content: bytes) -> dict:
                 "conditionnement": _clean(r[14]),
                 "retrait": _clean(r[15]),
                 "fiabilite": _clean(r[16]),
+                "fiche_produit": fiche_url,
                 "rang": _num(r[19]),
             }
             if offer["fournisseur"] and offer["prix_ht"] is not None:
