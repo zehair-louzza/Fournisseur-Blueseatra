@@ -1,0 +1,32 @@
+{
+  "summary": "First-pass full test of BlueSeaTra BTP procurement app. Backend: 15/15 pytest passed, including calculation-correctness tests (prix_achat=8.46, marge=25, qty=10, tva=20 → 112.80 / 22.56 / 135.36 EUR ✓). Frontend: Dashboard, Catalogue (search, filter, pagination, detail dialog, add-to-panier toast), Estimateur (line calc, global TVA presets 0/5.5/10/20/custom, global marge, save/load project), Fournisseurs, Parametres pages all load and work. Nav OK. One runtime error found on /alertes when typing in the alerts-search input (TypeError: toLowerCase is not a function).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Alertes.jsx", "issue": "Uncaught TypeError: (r[k] || \"\").toLowerCase is not a function when typing in alerts-search. Crashes the whole Alertes page. Cause: line 15 assumes r[k] is always a string; when a filter key (article/code/lot/point_controle/nature/fournisseur) resolves to a non-string (e.g. number or object) in one of the rows, .toLowerCase() throws. Fix: coerce with String(r[k] ?? \"\").toLowerCase().", "selector": "[data-testid=\"alerts-search\"]", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Fix filt() in /app/frontend/src/pages/Alertes.jsx line 15: use String(r[k] ?? '').toLowerCase() to avoid runtime crash on non-string values."
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py compute_line: when marge_pct <= 0 falls back to prix_vente_unit = prix_achat (no markup) — OK for MVP but silently ignores negative margins; consider validating input.",
+    "compute_line clamps marge to 99 when >=100 (prevents /0) but silently, without warning to user. Frontend Estimateur may allow >=100 unaware.",
+    "server.py: on_event('startup') is deprecated in FastAPI; consider lifespan handler.",
+    "server.py: single 400-line file — acceptable now but split by resource (catalogue, stats, projects, alerts) once features grow."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (new)",
+    "/app/test_reports/pytest/pytest_results.xml (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "~95% (1 runtime error on alerts search)"},
+  "test_credentials": "N/A – app is open access, no login",
+  "seed_data_creation": "TEST_UI_Project created via UI, TEST_Projet_Calc created and deleted via pytest. TEST_UI_Project may still be present in projects DB; safe to delete.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend tests live in /app/backend/tests/backend_test.py (pytest, 15 tests, all pass). Frontend flows to re-verify after Alertes fix: type into alerts-search then switch tabs (tab-completer/tab-verifier/tab-controls) — no runtime error should appear. Also verify TEST_UI_Project delete from /estimateur load dialog.",
+  "rca of the issue": "Alertes.filt calls (r[k] || '').toLowerCase() over data.a_completer, data.a_verifier, data.controls simultaneously (all three TabsContent render at once). When search is non-empty, at least one row across the three arrays has a filter-key value that is not a string (likely null coerced-to-non-string, or a numeric field). Reproduction: navigate to /alertes → type any text in alerts-search → red overlay 'Uncaught runtime errors: (r[k] || \"\").toLowerCase is not a function'. Mitigation: change filt to `arr.filter((r) => keys.some((k) => String(r[k] ?? '').toLowerCase().includes(search.toLowerCase())))`."
+}

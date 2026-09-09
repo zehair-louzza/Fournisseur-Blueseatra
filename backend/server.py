@@ -1,0 +1,407 @@
+from fastapi import FastAPI, APIRouter, HTTPException
+from dotenv import load_dotenv
+from starlette.middleware.cors import CORSMiddleware
+from motor.motor_asyncio import AsyncIOMotorClient
+import os
+import json
+import logging
+from pathlib import Path
+from pydantic import BaseModel
+from typing import List, Optional
+import uuid
+from datetime import datetime, timezone
+
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / '.env')
+
+mongo_url = os.environ['MONGO_URL']
+client = AsyncIOMotorClient(mongo_url)
+db = client[os.environ['DB_NAME']]
+
+app = FastAPI(title="BlueSeaTra — Gestion Achats TCE")
+api_router = APIRouter(prefix="/api")
+
+logger = logging.getLogger("btp")
+
+# ----------------- Helpers -----------------
+
+def derive_statut(fiabilite: Optional[str]) -> str:
+    f = (fiabilite or "").lower()
+    if "compl" in f:
+        return "a_completer"
+    if "vérifier" in f or "verifier" in f or "valider" in f:
+        return "a_verifier"
+    return "fiable"
+
+
+def compute_line(line: dict) -> dict:
+    prix_achat = float(line.get("prix_achat_ht") or 0)
+    marge = float(line.get("marge_pct") or 0)
+    qty = float(line.get("quantite") or 0)
+    tva = float(line.get("tva_pct") or 20)
+    if marge >= 100:
+        marge = 99.0
+    prix_vente_unit = prix_achat / (1 - marge / 100) if marge > 0 else prix_achat
+    total_achat = prix_achat * qty
+    total_vente_ht = prix_vente_unit * qty
+    marge_eur = total_vente_ht - total_achat
+    montant_tva = total_vente_ht * tva / 100
+    total_ttc = total_vente_ht + montant_tva
+    line = dict(line)
+    line["prix_vente_unit"] = round(prix_vente_unit, 2)
+    line["total_achat_ht"] = round(total_achat, 2)
+    line["total_vente_ht"] = round(total_vente_ht, 2)
+    line["marge_eur"] = round(marge_eur, 2)
+    line["montant_tva"] = round(montant_tva, 2)
+    line["total_ttc"] = round(total_ttc, 2)
+    return line
+
+
+def compute_project(project: dict) -> dict:
+    lines = [compute_line(li) for li in project.get("lignes", [])]
+    project["lignes"] = lines
+    total_achat = sum(li["total_achat_ht"] for li in lines)
+    total_vente = sum(li["total_vente_ht"] for li in lines)
+    total_tva = sum(li["montant_tva"] for li in lines)
+    total_ttc = sum(li["total_ttc"] for li in lines)
+    marge_globale = total_vente - total_achat
+    par_lot = {}
+    for li in lines:
+        lot = li.get("lot") or "Autre"
+        par_lot.setdefault(lot, 0.0)
+        par_lot[lot] += li["total_vente_ht"]
+    project["totaux"] = {
+        "total_achat_ht": round(total_achat, 2),
+        "total_vente_ht": round(total_vente, 2),
+        "marge_eur": round(marge_globale, 2),
+        "marge_pct": round((marge_globale / total_vente * 100) if total_vente else 0, 1),
+        "total_tva": round(total_tva, 2),
+        "total_ttc": round(total_ttc, 2),
+        "nb_lignes": len(lines),
+        "par_lot": [{"lot": k, "montant": round(v, 2)} for k, v in sorted(par_lot.items())],
+    }
+    return project
+
+
+# ----------------- Models -----------------
+
+class EstimateLine(BaseModel):
+    code: Optional[str] = None
+    article: str
+    lot: Optional[str] = None
+    unite: Optional[str] = None
+    fournisseur: Optional[str] = None
+    prix_achat_ht: float = 0
+    marge_pct: float = 25
+    quantite: float = 1
+    tva_pct: float = 20
+
+
+class ProjectCreate(BaseModel):
+    nom: str
+    client: Optional[str] = None
+    description: Optional[str] = None
+    lignes: List[EstimateLine] = []
+
+
+class ProjectUpdate(BaseModel):
+    nom: Optional[str] = None
+    client: Optional[str] = None
+    description: Optional[str] = None
+    lignes: Optional[List[EstimateLine]] = None
+
+
+# ----------------- Seed -----------------
+
+async def seed_data():
+    count = await db.articles.count_documents({})
+    if count > 0:
+        return
+    data_file = ROOT_DIR / "catalogue_data.json"
+    if not data_file.exists():
+        logger.warning("catalogue_data.json missing, skip seed")
+        return
+    with open(data_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    arts = data.get("articles", [])
+    for a in arts:
+        a["statut"] = derive_statut(a.get("fiabilite"))
+    if arts:
+        await db.articles.insert_many(arts)
+    for name in ("synthese", "sources", "parametres", "controls"):
+        docs = data.get(name, [])
+        if docs:
+            await db[name].delete_many({})
+            await db[name].insert_many(docs)
+    logger.info("Seeded %d articles", len(arts))
+
+
+@app.on_event("startup")
+async def on_startup():
+    await seed_data()
+    await db.articles.create_index("code")
+    await db.articles.create_index("lot")
+
+
+# ----------------- Catalogue endpoints -----------------
+
+@api_router.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
+@api_router.get("/filters")
+async def get_filters():
+    lots = sorted(await db.articles.distinct("lot"))
+    fournisseurs = sorted([f for f in await db.articles.distinct("fournisseur_retenu") if f])
+    sous_familles = sorted([s for s in await db.articles.distinct("sous_famille") if s])
+    return {
+        "lots": lots,
+        "fournisseurs": fournisseurs,
+        "sous_familles": sous_familles,
+        "statuts": [
+            {"value": "fiable", "label": "Fiable"},
+            {"value": "a_verifier", "label": "À vérifier"},
+            {"value": "a_completer", "label": "À compléter"},
+        ],
+    }
+
+
+@api_router.get("/catalogue")
+async def get_catalogue(
+    search: Optional[str] = None,
+    lot: Optional[str] = None,
+    fournisseur: Optional[str] = None,
+    statut: Optional[str] = None,
+    sous_famille: Optional[str] = None,
+    sort: str = "code",
+    page: int = 1,
+    page_size: int = 25,
+):
+    q = {}
+    if lot:
+        q["lot"] = lot
+    if fournisseur:
+        q["fournisseur_retenu"] = fournisseur
+    if statut:
+        q["statut"] = statut
+    if sous_famille:
+        q["sous_famille"] = sous_famille
+    if search:
+        rx = {"$regex": search, "$options": "i"}
+        q["$or"] = [
+            {"article": rx}, {"code": rx}, {"marque": rx},
+            {"ref_fournisseur": rx}, {"ref_fabricant": rx},
+            {"designation_fournisseur": rx},
+        ]
+    sort_map = {
+        "code": [("code", 1)],
+        "prix_asc": [("prix_achat_ht", 1)],
+        "prix_desc": [("prix_achat_ht", -1)],
+        "article": [("article", 1)],
+    }
+    total = await db.articles.count_documents(q)
+    cursor = db.articles.find(q, {"_id": 0}).sort(sort_map.get(sort, [("code", 1)]))
+    cursor = cursor.skip((page - 1) * page_size).limit(page_size)
+    items = await cursor.to_list(page_size)
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+@api_router.get("/catalogue/{code}")
+async def get_article(code: str):
+    art = await db.articles.find_one({"code": code}, {"_id": 0})
+    if not art:
+        raise HTTPException(404, "Article introuvable")
+    return art
+
+
+# ----------------- Stats / KPIs -----------------
+
+@api_router.get("/stats/overview")
+async def stats_overview():
+    total = await db.articles.count_documents({})
+    a_completer = await db.articles.count_documents({"statut": "a_completer"})
+    a_verifier = await db.articles.count_documents({"statut": "a_verifier"})
+    fiable = await db.articles.count_documents({"statut": "fiable"})
+    votre_tarif = await db.articles.count_documents({"type_prix": {"$regex": "tarif", "$options": "i"}})
+    pipeline = [
+        {"$match": {"prix_achat_ht": {"$ne": None, "$gt": 0}}},
+        {"$group": {"_id": None, "avg": {"$avg": "$prix_achat_ht"},
+                    "sum": {"$sum": "$prix_achat_ht"}, "n": {"$sum": 1}}},
+    ]
+    agg = await db.articles.aggregate(pipeline).to_list(1)
+    avg = agg[0]["avg"] if agg else 0
+    val_cat = agg[0]["sum"] if agg else 0
+    prix_releves = agg[0]["n"] if agg else 0
+    nb_lots = len(await db.articles.distinct("lot"))
+    nb_four = len([f for f in await db.articles.distinct("fournisseur_retenu") if f])
+    couverture = round(prix_releves / total * 100, 1) if total else 0
+    return {
+        "total_articles": total,
+        "prix_releves": prix_releves,
+        "a_completer": a_completer,
+        "a_verifier": a_verifier,
+        "fiable": fiable,
+        "votre_tarif": votre_tarif,
+        "prix_moyen": round(avg, 2),
+        "valeur_catalogue": round(val_cat, 2),
+        "nb_lots": nb_lots,
+        "nb_fournisseurs": nb_four,
+        "couverture": couverture,
+    }
+
+
+@api_router.get("/stats/by-lot")
+async def stats_by_lot():
+    pipeline = [
+        {"$group": {
+            "_id": "$lot",
+            "articles": {"$sum": 1},
+            "prix_moyen": {"$avg": "$prix_achat_ht"},
+            "valeur": {"$sum": {"$ifNull": ["$prix_achat_ht", 0]}},
+            "a_completer": {"$sum": {"$cond": [{"$eq": ["$statut", "a_completer"]}, 1, 0]}},
+            "a_verifier": {"$sum": {"$cond": [{"$eq": ["$statut", "a_verifier"]}, 1, 0]}},
+            "fiable": {"$sum": {"$cond": [{"$eq": ["$statut", "fiable"]}, 1, 0]}},
+        }},
+        {"$sort": {"_id": 1}},
+    ]
+    rows = await db.articles.aggregate(pipeline).to_list(100)
+    return [
+        {
+            "lot": r["_id"],
+            "articles": r["articles"],
+            "prix_moyen": round(r["prix_moyen"] or 0, 2),
+            "valeur": round(r["valeur"] or 0, 2),
+            "a_completer": r["a_completer"],
+            "a_verifier": r["a_verifier"],
+            "fiable": r["fiable"],
+        }
+        for r in rows
+    ]
+
+
+@api_router.get("/stats/by-supplier")
+async def stats_by_supplier():
+    pipeline = [
+        {"$match": {"fournisseur_retenu": {"$ne": None}}},
+        {"$group": {
+            "_id": "$fournisseur_retenu",
+            "articles": {"$sum": 1},
+            "prix_moyen": {"$avg": "$prix_achat_ht"},
+            "valeur": {"$sum": {"$ifNull": ["$prix_achat_ht", 0]}},
+            "votre_tarif": {"$sum": {"$cond": [
+                {"$regexMatch": {"input": {"$ifNull": ["$type_prix", ""]}, "regex": "tarif", "options": "i"}}, 1, 0]}},
+        }},
+        {"$sort": {"articles": -1}},
+    ]
+    rows = await db.articles.aggregate(pipeline).to_list(100)
+    sources = await db.sources.find({}, {"_id": 0}).to_list(100)
+    smap = {s["enseigne"]: s for s in sources}
+    out = []
+    for r in rows:
+        src = smap.get(r["_id"], {})
+        out.append({
+            "fournisseur": r["_id"],
+            "articles": r["articles"],
+            "prix_moyen": round(r["prix_moyen"] or 0, 2),
+            "valeur": round(r["valeur"] or 0, 2),
+            "votre_tarif": r["votre_tarif"],
+            "site": src.get("site"),
+            "acces": src.get("acces"),
+            "offres_retenues": src.get("offres_retenues"),
+        })
+    return out
+
+
+@api_router.get("/alerts")
+async def get_alerts():
+    a_completer = await db.articles.find({"statut": "a_completer"}, {"_id": 0}).to_list(500)
+    a_verifier = await db.articles.find({"statut": "a_verifier"}, {"_id": 0}).to_list(500)
+    controls = await db.controls.find({}, {"_id": 0}).to_list(500)
+    return {
+        "a_completer": a_completer,
+        "a_verifier": a_verifier,
+        "controls": controls,
+        "counts": {
+            "a_completer": len(a_completer),
+            "a_verifier": len(a_verifier),
+            "controls": len(controls),
+        },
+    }
+
+
+@api_router.get("/parametres")
+async def get_parametres():
+    params = await db.parametres.find({}, {"_id": 0}).to_list(100)
+    sources = await db.sources.find({}, {"_id": 0}).to_list(100)
+    return {"parametres": params, "sources": sources}
+
+
+# ----------------- Projects / Estimation -----------------
+
+@api_router.post("/projects")
+async def create_project(body: ProjectCreate):
+    doc = body.model_dump()
+    doc["id"] = str(uuid.uuid4())
+    doc["created_at"] = datetime.now(timezone.utc).isoformat()
+    doc["updated_at"] = doc["created_at"]
+    doc = compute_project(doc)
+    await db.projects.insert_one(dict(doc))
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.get("/projects")
+async def list_projects():
+    projs = await db.projects.find({}, {"_id": 0}).sort("updated_at", -1).to_list(200)
+    return projs
+
+
+@api_router.get("/projects/{pid}")
+async def get_project(pid: str):
+    p = await db.projects.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Projet introuvable")
+    return p
+
+
+@api_router.put("/projects/{pid}")
+async def update_project(pid: str, body: ProjectUpdate):
+    p = await db.projects.find_one({"id": pid})
+    if not p:
+        raise HTTPException(404, "Projet introuvable")
+    upd = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "lignes" in upd:
+        upd["lignes"] = [dict(li) for li in upd["lignes"]]
+    p.update(upd)
+    p["updated_at"] = datetime.now(timezone.utc).isoformat()
+    p = compute_project(p)
+    p.pop("_id", None)
+    await db.projects.replace_one({"id": pid}, dict(p))
+    return p
+
+
+@api_router.delete("/projects/{pid}")
+async def delete_project(pid: str):
+    res = await db.projects.delete_one({"id": pid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Projet introuvable")
+    return {"deleted": True}
+
+
+app.include_router(api_router)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+logging.basicConfig(level=logging.INFO)
+
+
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    client.close()

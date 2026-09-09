@@ -1,0 +1,119 @@
+{
+  "project_identity": {
+    "name": "BTP Procurement & Estimation Suite - BlueSeaTra SaaS",
+    "type": "Data-Heavy SaaS Dashboard & Material Procurement Management",
+    "locale": "fr-FR",
+    "currency": "EUR (€)",
+    "target_audience": "Conducteurs de travaux, économistes de la construction, acheteurs BTP, pme du bâtiment",
+    "catalogue_scope": "16 lots/catégories (Électricité, Plomberie, Éclairage, CVC, Serrurerie, Sécurité incendie, Plâtrerie, Peinture, Sols/carrelage, Menuiserie, Gros œuvre, Quincaillerie, EPI, Outillage, Maintenance) avec 8 fournisseurs majeurs (Rexel, YESSS, Point.P, La Plateforme du Bâtiment, Chausson, Prolians, SFIC, Au Forum du Bâtiment)"
+  },
+  "theme_and_colors": {
+    "theme_mode": "Hybrid with Dark/Light Toggle (Default: High-contrast BTP Slate Light & Deep Obsidian Dark)",
+    "archetype": "Architectural Precision & Performance Pro (Swiss High-Contrast + Warm Amber Accent)",
+    "palette": {
+      "primary": "hsl(215, 28%, 17%)",
+      "primary_hover": "hsl(215, 28%, 24%)",
+      "accent_amber": "hsl(38, 92%, 50%)",
+      "accent_blue": "hsl(210, 85%, 45%)",
+      "background_light": "hsl(210, 20%, 98%)",
+      "surface_light": "hsl(0, 0%, 100%)",
+      "border_light": "hsl(214, 15%, 89%)",
+      "background_dark": "hsl(222, 47%, 7%)",
+      "surface_dark": "hsl(222, 35%, 11%)",
+      "border_dark": "hsl(217, 20%, 18%)",
+      "text_main_light": "hsl(222, 47%, 11%)",
+      "text_muted_light": "hsl(215, 16%, 47%)",
+      "status_reliable": "hsl(142, 71%, 45%)",
+      "status_verify": "hsl(38, 92%, 50%)",
+      "status_obsolete": "hsl(0, 84%, 60%)"
+    },
+    "forbidden_colors": [
+      "#7351B7 (Generic AI Purple)",
+      "#1B93A4 (Teal Green for Dashboards)",
+      "#000000 (Pure Black without Blue tint)"
+    ]
+  },
+  "typography": {
+    "font_files_note": "Use standard React font imports or Google Fonts inside public/index.html or CSS",
+    "display_font": "Outfit, Plus Jakarta Sans, sans-serif",
+    "body_font": "Inter, system-ui, sans-serif",
+    "mono_font": "JetBrains Mono, Roboto Mono, monospace",
+    "hierarchy": {
+      "h1_hero_dashboard": "text-2xl sm:text-3xl font-bold tracking-tight",
+      "h2_section": "text-xl sm:text-2xl font-semibold tracking-tight",
+      "h3_card_title": "text-base sm:text-lg font-medium",
+      "kpi_value": "font-mono text-2xl sm:text-3xl font-extrabold tracking-tight",
+      "table_data": "text-xs sm:text-sm font-normal font-sans",
+      "mono_price": "font-mono text-xs sm:text-sm font-semibold"
+    },
+    "forbidden_fonts": [
+      "Space Grotesk",
+      "Comic Sans MS"
+    ]
+  },
+  "spacing_and_layout": {
+    "density": "High Density Grid (Mode B for Dashboards)",
+    "container_padding": "p-4 sm:p-6 lg:p-8",
+    "card_padding": "p-4 sm:p-5",
+    "gap_strategy": "gap-4 sm:gap-6",
+    "table_density": "Compact & Readable with row hover states and sticky header",
+    "mobile_first": "Always responsive grid-cols-1 md:grid-cols-2 lg:grid-cols-4"
+  },
+  "visual_enhancers": {
+    "cards": "Subtle 1px border (border-border/60), cardless/flat geometry with crisp shadows, rounded-xl",
+    "glassmorphism": "backdrop-blur-md bg-background/80 border border-border/50 for sticky filters and top navigation",
+    "badges": "Status badges with subtle background tint and vibrant border (Reliable = Green, To Verify = Amber, Obsolete = Red)",
+    "micro_interactions": "Smooth 150ms transitions on hover/focus, active states on data table rows and KPI cards"
+  },
+  "key_components_to_build": {
+    "1_header_saas_bar": "Global BlueSeaTra topbar with project switcher, supplier status indicator, theme toggle, and CSV catalogue import/export controls",
+    "2_kpi_summary_grid": "4 key cards: Total Catalogue Articles, Estimated Project Budget (HT/Marge/TVA/TTC), Supplier Reliability Score, Price Alert Counter",
+    "3_catalogue_data_table": "Search by reference/designation, filter by Lot (16 categories) & Supplier (8 suppliers) & Reliability status. Quick add to Estimation Basket",
+    "4_project_estimator_workspace": "Interactive project builder where users add articles, set quantities, adjust custom margin (%), calculate HT/TVA 20%/TTC with real-time Recharts breakdown",
+    "5_analytics_visualizations": "Recharts Bar & Pie graphs for Cost Distribution by Lot, Supplier Price Comparison, and Margin Analysis",
+    "6_alerts_and_audit_drawer": "Panel identifying articles needing price re-verification or missing packaging details"
+  },
+  "image_urls": [
+    {
+      "category": "construction_hero",
+      "url": "https://images.unsplash.com/photo-1501516069922-a9982bd6f3bd?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHw0fHxjb25zdHJ1Y3Rpb24lMjBtYXRlcmlhbHMlMjBhcmNoaXRlY3R1cmUlMjBidWlsZGluZyUyMHRvb2xzfGVufDB8fHx8MTc8ODk4NDc1N3ww&ixlib=rb-4.1.0&q=85",
+      "description": "Drafting instruments, blueprints and architect calipers"
+    },
+    {
+      "category": "tools_material",
+      "url": "https://images.unsplash.com/photo-1606676539940-12768ce0e762?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHwzfHxjb25zdHJ1Y3Rpb24lMjBtYXRlcmlhbHMlMjBhcmNoaXRlY3R1cmUlMjBidWlsZGluZyUyMHRvb2xzfGVufDB8fHx8MTc4ODk4NDc1N3ww&ixlib=rb-4.1.0&q=85",
+      "description": "Professional construction tools, drill, hammer and stud finder"
+    },
+    {
+      "category": "hardware_equipment",
+      "url": "https://images.unsplash.com/photo-1581783898377-1c85bf937427?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHwyfHxjb25zdHJ1Y3Rpb24lMjBtYXRlcmlhbHMlMjBhcmNoaXRlY3R1cmUlMjBidWlsZGluZyUyMHRvb2xzfGVufDB8fHx8MTc4ODk4NDc1N3ww&ixlib=rb-4.1.0&q=85",
+      "description": "Hammer, screwdriver, nails and construction hardware on white backdrop"
+    }
+  ],
+  "testing_requirements": {
+    "data_testid_rule": "ALL interactive components, buttons, filters, inputs, KPI cards, table rows, and modal triggers MUST have explicit data-testid attributes.",
+    "examples": [
+      "data-testid='catalogue-search-input'",
+      "data-testid='lot-filter-select'",
+      "data-testid='supplier-filter-select'",
+      "data-testid='add-article-to-estimate-btn'",
+      "data-testid='kpi-card-total-ht'",
+      "data-testid='estimate-quantity-input'",
+      "data-testid='export-pdf-estimate-btn'"
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Ensure all monetary values are clearly formatted as Euro (€) with French formatting (e.g., 1 250,50 € HT / 1 500,60 € TTC).",
+    "Implement precise mathematical calculations: Prix Vente HT = Prix Achat HT / (1 - Marge%), Montant TVA = Prix Vente HT * 0.20, Total TTC = Prix Vente HT + TVA.",
+    "Use pure JavaScript (.js / .jsx) components as configured in the frontend repository.",
+    "Utilize lucide-react icons for clear, crisp BTP status icons (Layers, ShieldCheck, AlertTriangle, Truck, Calculator, Download, Search, Filter).",
+    "Ensure Sonner toast notifications trigger whenever items are added/removed from estimates or when price updates occur.",
+    "Ensure the UI layout looks native to BlueSeaTra SaaS (clean sidebar/topbar navigation with smooth tab switching between Catalogue, Estimateur de Projet, and Analytics KPI)."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": {
+    "no_universal_transition": "Do not apply transition: all globally; target specific properties like border-color, background-color, opacity.",
+    "no_centered_app": "Avoid centering the main container. Text and data tables must align naturally to the left.",
+    "accessible_contrast": "Ensure text over table headers, badges, and dark cards meets APCA/WCAG contrast ratios.",
+    "toast_library": "Use sonner for user feedback toasts."
+  }
+}
