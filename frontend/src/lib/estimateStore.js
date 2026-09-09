@@ -45,6 +45,31 @@ export const EstimateProvider = ({ children }) => {
     setItems((prev) => prev.filter((i) => i.code !== code));
   }, []);
 
+  const addOffer = useCallback((art, offer) => {
+    const key = `${art.code}@${offer.fournisseur}`;
+    setItems((prev) => {
+      if (prev.find((i) => i.code === key)) {
+        toast.info(`« ${art.article} — ${offer.fournisseur} » est déjà dans le panier`);
+        return prev;
+      }
+      toast.success(`« ${art.article} » (${offer.fournisseur}) ajouté au panier`);
+      return [
+        ...prev,
+        {
+          code: key,
+          article: `${art.article} · ${offer.fournisseur}`,
+          lot: art.lot,
+          unite: art.unite,
+          fournisseur: offer.fournisseur,
+          prix_achat_ht: offer.prix_ht || 0,
+          marge_pct: 25,
+          quantite: 1,
+          tva_pct: art.tva_pct || 20,
+        },
+      ];
+    });
+  }, []);
+
   const updateItem = useCallback((code, patch) => {
     setItems((prev) => prev.map((i) => (i.code === code ? { ...i, ...patch } : i)));
   }, []);
@@ -52,7 +77,7 @@ export const EstimateProvider = ({ children }) => {
   const clear = useCallback(() => setItems([]), []);
 
   return (
-    <EstimateCtx.Provider value={{ items, addItem, removeItem, updateItem, clear, setItems }}>
+    <EstimateCtx.Provider value={{ items, addItem, addOffer, removeItem, updateItem, clear, setItems }}>
       {children}
     </EstimateCtx.Provider>
   );

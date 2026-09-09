@@ -188,3 +188,64 @@ def test_project_crud_and_computation(s):
 def test_project_delete_404(s):
     r = s.delete(f"{API}/projects/nonexistent-xyz", timeout=15)
     assert r.status_code == 404
+
+
+
+# ---------- Comparateur ----------
+def test_comparateur(s):
+    r = s.get(f"{API}/comparateur", timeout=30)
+    assert r.status_code == 200
+    d = r.json()
+    for k in ["items", "fournisseurs", "total_economie", "nb_comparables", "economie_moy_pct"]:
+        assert k in d, f"missing {k}"
+    assert isinstance(d["fournisseurs"], list) and len(d["fournisseurs"]) >= 2
+    assert isinstance(d["items"], list) and len(d["items"]) > 0
+    it = d["items"][0]
+    for k in ["code", "article", "lot", "prix", "nb_offres", "best_fournisseur", "best_prix", "economie_eur", "economie_pct"]:
+        assert k in it, f"missing item field {k}"
+    assert isinstance(it["prix"], dict)
+    assert it["nb_offres"] >= 2
+    # sorted by economie desc
+    ecos = [x["economie_eur"] for x in d["items"]]
+    assert ecos == sorted(ecos, reverse=True)
+    print(f"comparateur: {d['nb_comparables']} items, {len(d['fournisseurs'])} fournisseurs, total_eco={d['total_economie']}")
+
+
+# ---------- Catalogue retenu=true ----------
+def test_catalogue_retenu(s):
+    r = s.get(f"{API}/catalogue", params={"retenu": "true", "page_size": 100}, timeout=15)
+    assert r.status_code == 200
+    d = r.json()
+    assert d["total"] > 0
+    for it in d["items"]:
+        assert it.get("statut") == "fiable", f"non-fiable item: {it.get('code')} statut={it.get('statut')}"
+    # compare vs total
+    r_all = s.get(f"{API}/catalogue", timeout=15).json()
+    print(f"retenu={d['total']}  total={r_all['total']}")
+    assert d["total"] < r_all["total"]
+
+
+# ---------- Import xlsx ----------
+def test_import_catalogue():
+    path = "/app/catalogue.xlsx"
+    assert os.path.exists(path), "Test xlsx missing"
+    # total before
+    before = requests.get(f"{API}/catalogue", timeout=15).json()["total"]
+    with open(path, "rb") as f:
+        files = {"file": ("catalogue.xlsx", f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        r = requests.post(f"{API}/catalogue/import", files=files, timeout=60)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    for k in ["updated", "added", "total"]:
+        assert k in d
+    assert d["updated"] > 0
+    print(f"import: updated={d['updated']} added={d['added']} total={d['total']}")
+    after = requests.get(f"{API}/catalogue", timeout=15).json()["total"]
+    # data should still be coherent (~397)
+    assert abs(after - before) <= 5, f"total drift: before={before} after={after}"
+
+
+def test_import_catalogue_bad_file():
+    files = {"file": ("bad.xlsx", b"not-an-xlsx", "application/octet-stream")}
+    r = requests.post(f"{API}/catalogue/import", files=files, timeout=30)
+    assert r.status_code == 400

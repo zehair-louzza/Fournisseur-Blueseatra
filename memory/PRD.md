@@ -32,6 +32,14 @@
 - Backend : 15/15 pytest OK, calculs vérifiés (8,46 € × 10, marge 25 %, TVA 20 % → 112,80 / 22,56 / 135,36 €).
 - Frontend : tous les flux OK. Bug crash recherche Alertes corrigé (coercition String).
 
+## Implémenté (itération 2-3, 2026-06)
+- **Comparateur de prix** (`/comparateur`) : matrice multi-fournisseurs (8 enseignes en colonnes), meilleur prix mis en évidence (trophée + vert), 3 KPI (économie totale 31 218 €, 289 articles comparables, écart moyen 68,6 %), tri Économie↓/A→Z, recherche multi-termes, dialog détail par article (toutes les offres examinées triées).
+- **Onglets Catalogue** : « Produits examinés » (tous les articles + toutes les offres examinées par enseigne, utilisables dans le calcul) et « Prix retenus » (238 prix validés uniquement). `retenu=true` côté API.
+- **Import Excel** : `POST /api/catalogue/import` (openpyxl via `catalogue_parser.py`) met à jour/ajoute les articles depuis un nouveau classeur fournisseurs.
+- **Marge par lot** : panneau dans l'estimateur pour appliquer une marge distincte par lot.
+- **Prix examiné → estimation** : bouton « Utiliser » sur chaque offre examinée (dialog détail) ajoute ce prix précis au panier (clé composite `code@fournisseur`).
+- Tests : backend 19/19 pytest ; frontend itérations 2-3 100%. Bug « F is not defined » (comparateur) corrigé.
+
 ## Backlog (P1/P2)
 - Export PDF/Excel des devis (P1).
 - Comparateur de prix multi-fournisseurs par article dédié (P2).

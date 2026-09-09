@@ -1,5 +1,6 @@
-import { useEffect, useState, useCallback } from "react";
-import { Search, Filter, Plus, X, ExternalLink, Package, ChevronLeft, ChevronRight, Tag } from "lucide-react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { Search, Filter, Plus, X, ExternalLink, Package, ChevronLeft, ChevronRight, Tag, Upload, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { eur, pct, lotLabel } from "@/lib/format";
 import { StatutBadge } from "@/components/StatutBadge";
@@ -20,7 +21,10 @@ export default function Catalogue() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState(null);
-  const { addItem, items } = useEstimate();
+  const [vue, setVue] = useState("tout");
+  const [importing, setImporting] = useState(false);
+  const fileRef = useRef(null);
+  const { addItem, addOffer, items } = useEstimate();
   const pageSize = 25;
 
   useEffect(() => {
@@ -33,12 +37,32 @@ export default function Catalogue() {
     if (q.search) params.search = q.search;
     if (q.lot !== ALL) params.lot = q.lot;
     if (q.fournisseur !== ALL) params.fournisseur = q.fournisseur;
-    if (q.statut !== ALL) params.statut = q.statut;
+    if (q.statut !== ALL && vue !== "retenus") params.statut = q.statut;
+    if (vue === "retenus") params.retenu = true;
     api.catalogue(params).then((d) => { setData(d); setLoading(false); });
-  }, [page, q]);
+  }, [page, q, vue]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setPage(1); }, [q]);
+  useEffect(() => { setPage(1); }, [q, vue]);
+
+  const handleImport = async (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setImporting(true);
+    const fd = new FormData();
+    fd.append("file", f);
+    try {
+      const res = await api.importCatalogue(fd);
+      toast.success(`Catalogue mis à jour : ${res.updated} article(s) actualisé(s), ${res.added} ajouté(s)`);
+      api.filters().then(setFilters);
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Échec de l'import du fichier");
+    } finally {
+      setImporting(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
 
   const totalPages = Math.max(1, Math.ceil(data.total / pageSize));
   const inBasket = (code) => items.some((i) => i.code === code);
@@ -56,7 +80,35 @@ export default function Catalogue() {
             {data.total} article{data.total > 1 ? "s" : ""} · prix fournisseurs réels 2026
           </p>
         </div>
+        <div className="flex items-center gap-2">
+          <input ref={fileRef} type="file" accept=".xlsx" className="hidden" onChange={handleImport} data-testid="import-file-input" />
+          <button data-testid="import-catalogue-btn" onClick={() => fileRef.current?.click()} disabled={importing}
+            className="flex h-10 items-center gap-2 rounded-lg border border-border px-4 text-sm font-medium hover:bg-secondary transition-colors disabled:opacity-60">
+            {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+            {importing ? "Import en cours…" : "Importer un fichier Excel"}
+          </button>
+        </div>
       </header>
+
+      <div className="flex items-center gap-1 rounded-lg border border-border/70 bg-card p-1 w-fit">
+        {[{ k: "tout", l: "Produits examinés" }, { k: "retenus", l: "Prix retenus" }].map((t) => (
+          <button key={t.k} data-testid={`vue-tab-${t.k}`} onClick={() => setVue(t.k)}
+            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+              vue === t.k ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+            }`}>
+            {t.l}
+          </button>
+        ))}
+      </div>
+      {vue === "retenus" ? (
+        <p className="-mt-2 text-xs text-muted-foreground">
+          Prix validés (correspondance confirmée), directement utilisables en devis. Les articles « à vérifier » et « à compléter » restent disponibles dans « Produits examinés » et l'estimateur.
+        </p>
+      ) : (
+        <p className="-mt-2 text-xs text-muted-foreground">
+          Tous les produits examinés (meilleur prix retenu par article). Ouvrez une ligne pour voir et utiliser chaque prix examiné par enseigne dans vos calculs.
+        </p>
+      )}
 
       {/* Filter bar */}
       <div className="sticky top-14 z-10 rounded-xl border border-border/70 bg-card/90 p-3 backdrop-blur-md shadow-sm">
@@ -89,7 +141,7 @@ export default function Catalogue() {
               {filters.fournisseurs.map((f) => <SelectItem key={f} value={f}>{f}</SelectItem>)}
             </SelectContent>
           </Select>
-          <Select value={q.statut} onValueChange={(v) => setQ({ ...q, statut: v })}>
+          <Select value={q.statut} onValueChange={(v) => setQ({ ...q, statut: v })} disabled={vue === "retenus"}>
             <SelectTrigger data-testid="statut-filter-select" className="h-10 w-[150px]">
               <SelectValue placeholder="Fiabilité" />
             </SelectTrigger>
@@ -248,10 +300,10 @@ export default function Catalogue() {
                 </button>
               </div>
 
-              {detail.offers?.length > 1 && (
+              {detail.offers?.length > 0 && (
                 <div>
                   <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-                    <Tag className="h-4 w-4 text-accent" /> Offres fournisseurs ({detail.offers.length})
+                    <Tag className="h-4 w-4 text-accent" /> Produits examinés — toutes enseignes ({detail.offers.length})
                   </p>
                   <div className="overflow-hidden rounded-lg border border-border/60">
                     <table className="w-full text-sm">
@@ -260,6 +312,7 @@ export default function Catalogue() {
                           <th className="px-3 py-2 text-left font-medium">Fournisseur</th>
                           <th className="px-3 py-2 text-left font-medium">Type de prix</th>
                           <th className="px-3 py-2 text-right font-medium">Prix HT</th>
+                          <th className="px-3 py-2 text-right font-medium">Action</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -268,11 +321,21 @@ export default function Catalogue() {
                             <td className="px-3 py-2">{o.fournisseur}</td>
                             <td className="px-3 py-2 text-xs text-muted-foreground">{o.type_prix}</td>
                             <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums">{eur(o.prix_ht)}</td>
+                            <td className="px-3 py-2 text-right">
+                              <button data-testid={`use-offer-btn-${i}`} disabled={!o.prix_ht}
+                                onClick={() => addOffer(detail, o)}
+                                className="rounded-md border border-border px-2 py-1 text-xs hover:border-accent hover:text-accent disabled:opacity-30 transition-colors">
+                                Utiliser
+                              </button>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
+                  <p className="mt-1.5 text-[11px] text-muted-foreground">
+                    « Utiliser » ajoute ce prix examiné précis au panier d'estimation, indépendamment du prix retenu.
+                  </p>
                 </div>
               )}
               {detail.fiche_produit && (

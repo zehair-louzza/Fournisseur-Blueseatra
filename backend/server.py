@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -10,6 +10,8 @@ from pydantic import BaseModel
 from typing import List, Optional
 import uuid
 from datetime import datetime, timezone
+
+from catalogue_parser import parse_catalogue
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -174,11 +176,14 @@ async def get_catalogue(
     fournisseur: Optional[str] = None,
     statut: Optional[str] = None,
     sous_famille: Optional[str] = None,
+    retenu: Optional[bool] = None,
     sort: str = "code",
     page: int = 1,
     page_size: int = 25,
 ):
     q = {}
+    if retenu:
+        q["statut"] = "fiable"
     if lot:
         q["lot"] = lot
     if fournisseur:
@@ -387,6 +392,83 @@ async def delete_project(pid: str):
     if res.deleted_count == 0:
         raise HTTPException(404, "Projet introuvable")
     return {"deleted": True}
+
+
+@api_router.get("/comparateur")
+async def comparateur():
+    order = [
+        "Au Forum du Bâtiment", "YESSS Électrique", "Rexel",
+        "La Plateforme du Bâtiment", "Chausson Matériaux", "Point.P",
+        "Prolians", "SFIC", "Icilux",
+    ]
+    arts = await db.articles.find({}, {"_id": 0}).to_list(2000)
+    items = []
+    total_eco = 0.0
+    eco_pcts = []
+    seen = set()
+    for a in arts:
+        prix = {}
+        for o in a.get("offers", []):
+            if not o.get("prix_ht"):
+                continue
+            f = o["fournisseur"]
+            p = round(o["prix_ht"], 2)
+            if f not in prix or p < prix[f]:
+                prix[f] = p
+        if len(prix) < 2:
+            continue
+        for f in prix:
+            seen.add(f)
+        best_f = min(prix, key=prix.get)
+        best_p = prix[best_f]
+        worst_p = max(prix.values())
+        eco = worst_p - best_p
+        eco_pct = (eco / worst_p * 100) if worst_p else 0
+        total_eco += eco
+        eco_pcts.append(eco_pct)
+        items.append({
+            "code": a["code"], "article": a["article"], "lot": a["lot"],
+            "prix": prix, "nb_offres": len(prix),
+            "best_fournisseur": best_f, "best_prix": best_p, "worst_prix": round(worst_p, 2),
+            "economie_eur": round(eco, 2), "economie_pct": round(eco_pct, 1),
+        })
+    items.sort(key=lambda x: x["economie_eur"], reverse=True)
+    fournisseurs = [f for f in order if f in seen] + sorted(seen - set(order))
+    return {
+        "items": items,
+        "fournisseurs": fournisseurs,
+        "total_economie": round(total_eco, 2),
+        "nb_comparables": len(items),
+        "economie_moy_pct": round(sum(eco_pcts) / len(eco_pcts), 1) if eco_pcts else 0,
+    }
+
+
+@api_router.post("/catalogue/import")
+async def import_catalogue(file: UploadFile = File(...)):
+    content = await file.read()
+    try:
+        data = parse_catalogue(content)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Fichier illisible : {e}")
+    arts = data.get("articles", [])
+    if not arts:
+        raise HTTPException(400, "Aucun article reconnu dans le fichier (structure attendue : feuilles par lot).")
+    updated, added = 0, 0
+    for a in arts:
+        a["statut"] = derive_statut(a.get("fiabilite"))
+        existing = await db.articles.find_one({"code": a["code"]}, {"_id": 1})
+        if existing:
+            await db.articles.update_one({"code": a["code"]}, {"$set": a})
+            updated += 1
+        else:
+            await db.articles.insert_one(dict(a))
+            added += 1
+    for name in ("synthese", "sources", "parametres", "controls"):
+        docs = data.get(name, [])
+        if docs:
+            await db[name].delete_many({})
+            await db[name].insert_many([dict(d) for d in docs])
+    return {"updated": updated, "added": added, "total": len(arts)}
 
 
 app.include_router(api_router)

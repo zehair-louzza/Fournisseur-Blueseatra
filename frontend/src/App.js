@@ -8,6 +8,7 @@ import Dashboard from "@/pages/Dashboard";
 import Catalogue from "@/pages/Catalogue";
 import Estimateur from "@/pages/Estimateur";
 import Fournisseurs from "@/pages/Fournisseurs";
+import Comparateur from "@/pages/Comparateur";
 import Alertes from "@/pages/Alertes";
 import Parametres from "@/pages/Parametres";
 
@@ -23,6 +24,7 @@ function App() {
               <Route path="/estimateur" element={<Estimateur />} />
               <Route path="/estimateur/:id" element={<Estimateur />} />
               <Route path="/fournisseurs" element={<Fournisseurs />} />
+              <Route path="/comparateur" element={<Comparateur />} />
               <Route path="/alertes" element={<Alertes />} />
               <Route path="/parametres" element={<Parametres />} />
             </Routes>

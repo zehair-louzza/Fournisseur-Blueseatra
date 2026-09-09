@@ -1,0 +1,27 @@
+{
+  "summary": "Iteration 3 frontend-only targeted retest. Verified (1) Comparateur detail dialog fix ('F is not defined' resolved), (2) new 'Produits examinés' tab + use-offer-btn flow adding specific offers with composite keys code@fournisseur, (3) Estimateur calc using examined offer prices, (4) non-regression on 'Prix retenus' tab. All 4 targeted scenarios passed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dialogs (comparateur-detail-dialog, article-detail-dialog)", "issues": ["React a11y warning: Missing Description or aria-describedby on Radix DialogContent. Non-blocking but should add DialogDescription for accessibility compliance."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Optional: add <DialogDescription> to DialogContent components to silence Radix a11y warnings."
+  ],
+  "critical_code_review_comments": [
+    "Comparateur.jsx: helper component F correctly defined at module scope (fixed).",
+    "estimateStore.js addOffer uses composite key `${code}@${fournisseur}` — clean separation from addItem, prevents collision. Good.",
+    "Catalogue.jsx: use-offer-btn added inside offers table; row click stopPropagation on the '+' add button is correct."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (per request)", "frontend": "100%"},
+  "seed_data_creation": "None. Cleaned localStorage bst_estimate_basket at end of test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 3 validated: Comparateur detail dialog now opens without crash (F helper defined). Catalogue has two tabs: 'Produits examinés' (vue-tab-tout, default) and 'Prix retenus' (vue-tab-retenus). Article detail dialog shows 'Produits examinés — toutes enseignes' table with use-offer-btn-<i> buttons; clicking them calls addOffer() which creates a composite-keyed line (code@fournisseur) in the estimate basket. Verified live with CFA-002: added Rexel (1.05€) and Au Forum du Bâtiment (152.80€) as two distinct basket entries; Estimateur displayed both with correct Vente HT/TTC per 25% marge + 20% TVA. Panier badge in sidebar incremented to 2. Non-regression: 'Prix retenus' tab loads fine (a_completer/a_verifier strings only appear in the descriptive paragraph, not as badges).",
+  "rca of the issue": "N/A — bug was fixed by main agent (module-level `const F = ({label,value}) => ...` restored in Comparateur.jsx line 22-28)."
+}

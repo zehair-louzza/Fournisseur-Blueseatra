@@ -11,6 +11,7 @@ import {
   Sun,
   ShoppingCart,
   Layers3,
+  Scale,
 } from "lucide-react";
 import { useEstimate } from "@/lib/estimateStore";
 import { useTheme } from "@/lib/theme";
@@ -19,6 +20,7 @@ const NAV = [
   { to: "/", label: "Tableau de bord", Icon: LayoutDashboard, end: true },
   { to: "/catalogue", label: "Catalogue", Icon: Package },
   { to: "/estimateur", label: "Estimateur de projet", Icon: Calculator },
+  { to: "/comparateur", label: "Comparateur prix", Icon: Scale },
   { to: "/fournisseurs", label: "Fournisseurs", Icon: Truck },
   { to: "/alertes", label: "Alertes qualité", Icon: AlertTriangle },
   { to: "/parametres", label: "Paramètres", Icon: Settings2 },

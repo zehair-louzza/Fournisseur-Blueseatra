@@ -2,12 +2,12 @@ import { useEffect, useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   Calculator, Trash2, Save, FolderOpen, Plus, ShoppingCart, X, FileText, Percent,
-  PieChart as PieIcon, Receipt,
+  PieChart as PieIcon, Receipt, Layers,
 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { eur, pct, lotLabel } from "@/lib/format";
+import { eur, pct, lotLabel, lotNum } from "@/lib/format";
 import { LOT_PALETTE } from "@/lib/colors";
 import { useEstimate } from "@/lib/estimateStore";
 import {
@@ -70,6 +70,15 @@ export default function Estimateur() {
     if (isNaN(t)) return;
     setItems(items.map((i) => ({ ...i, tva_pct: t })));
     toast.success(`TVA de ${t}% appliquée à toutes les lignes`);
+  };
+
+  const [showLotMarge, setShowLotMarge] = useState(false);
+  const lotsInBasket = [...new Set(items.map((i) => i.lot))];
+  const applyMargeLot = (lot, val) => {
+    const m = Number(val);
+    if (isNaN(m)) return;
+    setItems(items.map((i) => (i.lot === lot ? { ...i, marge_pct: m } : i)));
+    toast.success(`Marge ${m}% appliquée au lot ${lotLabel(lot)}`);
   };
 
   const saveProject = async () => {
@@ -173,11 +182,30 @@ export default function Estimateur() {
                   onKeyDown={(e) => e.key === "Enter" && e.target.value !== "" && applyTvaAll(e.target.value)}
                   className="w-14 rounded border border-border bg-background px-2 py-1 text-right font-mono text-xs outline-none focus:border-accent" />
               </div>
+              <button data-testid="toggle-marge-lot-btn" onClick={() => setShowLotMarge((v) => !v)}
+                className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors ${
+                  showLotMarge ? "border-accent bg-accent/10 text-foreground" : "border-border bg-card hover:bg-secondary"
+                }`}>
+                <Layers className="h-4 w-4 text-accent" /> Marge par lot
+              </button>
               <button onClick={clear} data-testid="clear-basket-btn"
                 className="ml-auto flex items-center gap-1 text-sm text-muted-foreground hover:text-rose-500 transition-colors">
                 <X className="h-4 w-4" /> Vider
               </button>
             </div>
+
+            {showLotMarge && lotsInBasket.length > 0 && (
+              <div data-testid="marge-lot-panel" className="rounded-xl border border-border/70 bg-card p-4">
+                <p className="mb-3 flex items-center gap-2 text-sm font-medium">
+                  <Layers className="h-4 w-4 text-accent" /> Marge spécifique par lot
+                </p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {lotsInBasket.map((lot) => (
+                    <LotMargeRow key={lot} lot={lot} items={items} onApply={applyMargeLot} />
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="rounded-xl border border-border/70 bg-card overflow-hidden">
               <div className="overflow-x-auto">
@@ -359,3 +387,22 @@ const Row = ({ label, value, strong, accent, extra, testid }) => (
     </dd>
   </div>
 );
+
+const LotMargeRow = ({ lot, items, onApply }) => {
+  const current = items.find((i) => i.lot === lot)?.marge_pct ?? 25;
+  const [val, setVal] = useState(current);
+  useEffect(() => { setVal(current); }, [current]);
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-background px-3 py-2">
+      <span className="flex-1 truncate text-sm" title={lot}>{lotLabel(lot)}</span>
+      <input data-testid={`marge-lot-input-${lotNum(lot)}`} type="number" value={val}
+        onChange={(e) => setVal(e.target.value)}
+        className="w-16 rounded border border-border bg-background px-2 py-1 text-right font-mono text-xs outline-none focus:border-accent" />
+      <span className="text-xs text-muted-foreground">%</span>
+      <button data-testid={`apply-marge-lot-${lotNum(lot)}`} onClick={() => onApply(lot, val)}
+        className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
+        OK
+      </button>
+    </div>
+  );
+};

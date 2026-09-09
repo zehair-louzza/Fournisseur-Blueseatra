@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 2 tests: backend 19/19 pytest passed (added 4 new tests: /api/comparateur, /api/catalogue?retenu=true, /api/catalogue/import valid xlsx, and 400 on bad file). Expected data numbers match spec: total=397, retenu=238, comparables=289, fournisseurs list includes Au Forum du Bâtiment, YESSS Électrique, Rexel, La Plateforme du Bâtiment, Chausson Matériaux, Point.P, Prolians, SFIC. Frontend: Comparateur matrix/KPIs/sort(eco↔alpha)/multi-term search all OK; Catalogue 'Prix retenus' tab shows only statut-badge-fiable (0 a_completer, 0 a_verifier) and statut-filter-select is disabled; Estimateur 'Marge par lot' panel opens, applying marge to a lot updates only that lot's Vente HT lines (verified with toast 'Marge 50% appliquée au lot Courants faibles'). ONE HIGH-priority bug: clicking any comparateur row crashes the page (ReferenceError: F is not defined) because Comparateur.jsx uses <F label=… value=…/> inside the detail dialog but no F component is defined or imported. Bug from iteration 1 (Alertes.jsx toLowerCase) verified fixed via non-regression run of backend + no crash reported.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Comparateur.jsx (detail dialog)",
+        "issue": "ReferenceError: F is not defined — clicking any row (comparateur-row-*) opens the detail dialog which uses <F label=... value=... /> six times (lines ~154-159) but no F component is defined or imported. Whole /comparateur page crashes with red overlay 'Uncaught runtime errors: F is not defined' as soon as a row is clicked.",
+        "selector": "[data-testid=\"comparateur-detail-dialog\"] (rendered from click on [data-testid^=\"comparateur-row-\"])",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Comparateur.jsx: define (or import) the missing F field-row component used in the detail dialog. Suggested minimal fix at the bottom of Comparateur.jsx: `const F = ({label, value}) => (<div><p className=\"text-xs text-muted-foreground\">{label}</p><p className=\"font-medium\">{value || '—'}</p></div>);`  (or reuse the Row helper style from Estimateur)."
+  ],
+  "critical_code_review_comments": [
+    "Comparateur.jsx uses <F ...> without defining/importing it — clear leftover from refactor; needs unit/smoke test for detail dialog to catch this class of regression.",
+    "server.py POST /api/catalogue/import updates docs one by one in a loop — for large files this could be slow. Consider bulk_write or bulk upsert.",
+    "server.py /api/comparateur loads every article (find({}).to_list(2000)) and computes in Python; if catalogue grows past 2000 items the hard cap will silently drop data — replace with async cursor iteration or paginate.",
+    "server.py: on_event('startup') is still deprecated in FastAPI; move to lifespan handler (noted iter1)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (added tests: test_comparateur, test_catalogue_retenu, test_import_catalogue, test_import_catalogue_bad_file)",
+    "/app/test_reports/pytest/pytest_results.xml (regenerated)"
+  ],
+  "success_rate": {"backend": "100% (19/19)", "frontend": "~85% — comparateur detail dialog broken; all other flows OK"},
+  "test_credentials": "N/A — accès libre",
+  "seed_data_creation": "None persisted this iteration (basket cleared, no project saved).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression suite lives at /app/backend/tests/backend_test.py (19 tests, all pass, ~4s). After main agent adds the F component in Comparateur.jsx, re-verify: navigate to /comparateur → click any comparateur-row-* → data-testid=comparateur-detail-dialog visible → contains 'Prix par enseigne' section with a table of offers sorted asc and a Trophy icon on the first row.",
+  "rca of the issue": "Comparateur detail dialog crash — RCA: In /app/frontend/src/pages/Comparateur.jsx, the render inside <Dialog><DialogContent data-testid=\"comparateur-detail-dialog\"> references <F label=\"Marque\" value={detail.marque} /> and 5 similar usages but the identifier F is never declared or imported anywhere in the file (only default export Comparateur is defined; helper components Row/LotMargeRow exist only in Estimateur.jsx). Repro: /comparateur → click any tbody row (comparateur-row-<code>) → setDetail is called with the article; React tries to render the dialog → throws ReferenceError: F is not defined → CRA error overlay covers the app. Mitigation: define a small F helper inside Comparateur.jsx or replace the six <F .../> usages with existing markup."
+}
