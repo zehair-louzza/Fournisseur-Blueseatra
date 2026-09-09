@@ -224,22 +224,64 @@ async def get_article(code: str):
 
 @api_router.get("/stats/overview")
 async def stats_overview():
-    total = await db.articles.count_documents({})
-    a_completer = await db.articles.count_documents({"statut": "a_completer"})
-    a_verifier = await db.articles.count_documents({"statut": "a_verifier"})
-    fiable = await db.articles.count_documents({"statut": "fiable"})
-    votre_tarif = await db.articles.count_documents({"type_prix": {"$regex": "tarif", "$options": "i"}})
-    pipeline = [
-        {"$match": {"prix_achat_ht": {"$ne": None, "$gt": 0}}},
-        {"$group": {"_id": None, "avg": {"$avg": "$prix_achat_ht"},
-                    "sum": {"$sum": "$prix_achat_ht"}, "n": {"$sum": 1}}},
-    ]
-    agg = await db.articles.aggregate(pipeline).to_list(1)
-    avg = agg[0]["avg"] if agg else 0
-    val_cat = agg[0]["sum"] if agg else 0
-    prix_releves = agg[0]["n"] if agg else 0
-    nb_lots = len(await db.articles.distinct("lot"))
-    nb_four = len([f for f in await db.articles.distinct("fournisseur_retenu") if f])
+    arts = await db.articles.find(
+        {},
+        {"_id": 0, "statut": 1, "type_prix": 1, "prix_achat_ht": 1,
+         "offers": 1, "lot": 1, "fournisseur_retenu": 1, "retrait": 1},
+    ).to_list(2000)
+    total = len(arts)
+    a_completer = a_verifier = fiable = votre_tarif = 0
+    prix_releves = 0
+    somme_prix = 0.0
+    total_offres = 0
+    nb_comparables = 0
+    economie = 0.0
+    valeur_best = 0.0
+    valeur_cat = 0.0
+    dispo = {"Retrait agence": 0, "Sur commande": 0, "Autre / à préciser": 0}
+    fournisseurs = set()
+    lots = set()
+    for a in arts:
+        st = a.get("statut")
+        if st == "a_completer":
+            a_completer += 1
+        elif st == "a_verifier":
+            a_verifier += 1
+        else:
+            fiable += 1
+        if a.get("fournisseur_retenu"):
+            fournisseurs.add(a["fournisseur_retenu"])
+        if a.get("lot"):
+            lots.add(a["lot"])
+        if "tarif" in (a.get("type_prix") or "").lower():
+            votre_tarif += 1
+        p = a.get("prix_achat_ht")
+        if p:
+            prix_releves += 1
+            somme_prix += p
+            valeur_cat += p
+        best_by = {}
+        for o in a.get("offers", []):
+            if o.get("prix_ht") is None:
+                continue
+            f = o["fournisseur"]
+            if f not in best_by or o["prix_ht"] < best_by[f]:
+                best_by[f] = o["prix_ht"]
+        prices = list(best_by.values())
+        total_offres += len(prices)
+        if len(prices) >= 2:
+            nb_comparables += 1
+            economie += max(prices) - min(prices)
+        best_p = min(prices) if prices else p
+        if best_p is not None:
+            valeur_best += best_p
+        r = (a.get("retrait") or "").lower()
+        if "commande" in r:
+            dispo["Sur commande"] += 1
+        elif "retrait" in r or "livraison" in r:
+            dispo["Retrait agence"] += 1
+        else:
+            dispo["Autre / à préciser"] += 1
     couverture = round(prix_releves / total * 100, 1) if total else 0
     return {
         "total_articles": total,
@@ -248,11 +290,16 @@ async def stats_overview():
         "a_verifier": a_verifier,
         "fiable": fiable,
         "votre_tarif": votre_tarif,
-        "prix_moyen": round(avg, 2),
-        "valeur_catalogue": round(val_cat, 2),
-        "nb_lots": nb_lots,
-        "nb_fournisseurs": nb_four,
+        "prix_moyen": round(somme_prix / prix_releves, 2) if prix_releves else 0,
+        "valeur_catalogue": round(valeur_cat, 2),
+        "valeur_meilleur_prix": round(valeur_best, 2),
+        "economie_potentielle": round(economie, 2),
+        "total_offres": total_offres,
+        "nb_comparables": nb_comparables,
+        "nb_lots": len(lots),
+        "nb_fournisseurs": len(fournisseurs),
         "couverture": couverture,
+        "disponibilite": [{"name": k, "value": v} for k, v in dispo.items() if v > 0],
     }
 
 

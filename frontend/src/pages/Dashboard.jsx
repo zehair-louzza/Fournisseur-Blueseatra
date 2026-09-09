@@ -6,19 +6,24 @@ import {
 } from "recharts";
 import {
   Package, Wallet, ShieldCheck, AlertTriangle, Layers3, Truck, TrendingUp, CircleDashed,
+  Boxes, TrendingDown,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { eur, num, pct, lotLabel } from "@/lib/format";
 import { LOT_PALETTE } from "@/lib/colors";
 import { KpiCard } from "@/components/KpiCard";
 
+const DISPO_COLORS = { "Retrait agence": "#10b981", "Sur commande": "#f59e0b", "Autre / à préciser": "#94a3b8" };
+
 export default function Dashboard() {
   const [ov, setOv] = useState(null);
   const [byLot, setByLot] = useState([]);
+  const [bySupplier, setBySupplier] = useState([]);
 
   useEffect(() => {
     api.overview().then(setOv);
     api.byLot().then(setByLot);
+    api.bySupplier().then(setBySupplier);
   }, []);
 
   const lotBar = byLot
@@ -33,6 +38,9 @@ export default function Dashboard() {
       ]
     : [];
 
+  const supplierBar = [...bySupplier].sort((a, b) => b.articles - a.articles);
+  const dispoPie = ov?.disponibilite || [];
+
   return (
     <div className="space-y-6">
       <header className="relative overflow-hidden rounded-2xl border border-border/70">
@@ -46,7 +54,7 @@ export default function Dashboard() {
           <p className="text-xs font-medium uppercase tracking-widest text-amber-400">Achats TCE · ANELEC Groupe</p>
           <h1 className="mt-2 font-display text-2xl sm:text-3xl font-bold tracking-tight text-white">Tableau de bord</h1>
           <p className="mt-1 max-w-xl text-sm text-slate-300">
-            Vue d'ensemble du catalogue matériels et des indicateurs d'achat pour estimer vos projets.
+            Vue d'ensemble du catalogue multi-fournisseurs : offres relevées, meilleurs prix et disponibilités.
           </p>
         </div>
       </header>
@@ -55,15 +63,15 @@ export default function Dashboard() {
         <KpiCard testid="kpi-total-articles" index={0} label="Articles au catalogue"
           value={ov ? num(ov.total_articles) : "…"} Icon={Package} accent="blue"
           sub={ov ? `${ov.nb_lots} lots · ${ov.nb_fournisseurs} fournisseurs` : ""} />
-        <KpiCard testid="kpi-valeur" index={1} label="Valeur catalogue (achat HT)"
-          value={ov ? eur(ov.valeur_catalogue, { max: 0 }) : "…"} Icon={Wallet} accent="amber"
-          sub={ov ? `Prix moyen ${eur(ov.prix_moyen)}` : ""} />
-        <KpiCard testid="kpi-couverture" index={2} label="Couverture des prix"
-          value={ov ? pct(ov.couverture) : "…"} Icon={ShieldCheck} accent="emerald"
-          sub={ov ? `${num(ov.prix_releves)} prix relevés` : ""} />
-        <KpiCard testid="kpi-alertes" index={3} label="Articles à traiter"
-          value={ov ? num(ov.a_completer + ov.a_verifier) : "…"} Icon={AlertTriangle} accent="rose"
-          sub={ov ? `${ov.a_completer} à compléter · ${ov.a_verifier} à vérifier` : ""} />
+        <KpiCard testid="kpi-offres" index={1} label="Offres fournisseurs relevées"
+          value={ov ? num(ov.total_offres) : "…"} Icon={Boxes} accent="slate"
+          sub={ov ? `${num(ov.nb_comparables)} articles multi-fournisseurs` : ""} />
+        <KpiCard testid="kpi-valeur" index={2} label="Valeur au meilleur prix"
+          value={ov ? eur(ov.valeur_meilleur_prix, { max: 0 }) : "…"} Icon={Wallet} accent="amber"
+          sub={ov ? `Catalogue retenu ${eur(ov.valeur_catalogue, { max: 0 })}` : ""} />
+        <KpiCard testid="kpi-economie" index={3} label="Économie potentielle"
+          value={ov ? eur(ov.economie_potentielle, { max: 0 }) : "…"} Icon={TrendingDown} accent="emerald"
+          sub={ov ? `en choisissant le moins cher` : ""} />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -116,6 +124,63 @@ export default function Dashboard() {
               <div key={s.name} className="flex items-center justify-between text-sm">
                 <span className="flex items-center gap-2">
                   <span className="h-2.5 w-2.5 rounded-full" style={{ background: s.color }} />
+                  {s.name}
+                </span>
+                <span className="font-mono font-semibold tabular-nums">{num(s.value)}</span>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+      </div>
+
+      {/* Suppliers + availability row */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+          className="rounded-xl border border-border/70 bg-card p-5 lg:col-span-2">
+          <div className="flex items-center gap-2 mb-4">
+            <Truck className="h-4 w-4 text-accent" />
+            <h2 className="font-display text-lg font-semibold">Articles retenus par fournisseur</h2>
+          </div>
+          <div className="h-[300px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={supplierBar} margin={{ left: 0, right: 8, bottom: 50 }}>
+                <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
+                <XAxis dataKey="fournisseur" angle={-25} textAnchor="end" height={70} interval={0}
+                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} />
+                <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
+                <Tooltip cursor={{ fill: "hsl(var(--secondary))" }}
+                  contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
+                  formatter={(v, n) => [num(v), n === "articles" ? "Articles" : n]} />
+                <Bar dataKey="articles" radius={[4, 4, 0, 0]}>
+                  {supplierBar.map((_, i) => <Cell key={i} fill={LOT_PALETTE[i % LOT_PALETTE.length]} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </motion.div>
+
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
+          className="rounded-xl border border-border/70 bg-card p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Truck className="h-4 w-4 text-accent" />
+            <h2 className="font-display text-lg font-semibold">Disponibilité / livraison</h2>
+          </div>
+          <div className="h-[220px]">
+            <ResponsiveContainer width="100%" height={220}>
+              <PieChart>
+                <Pie data={dispoPie} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={3} isAnimationActive={false}>
+                  {dispoPie.map((s, i) => <Cell key={i} fill={DISPO_COLORS[s.name] || LOT_PALETTE[i]} />)}
+                </Pie>
+                <Tooltip
+                  contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="mt-2 space-y-1.5">
+            {dispoPie.map((s) => (
+              <div key={s.name} className="flex items-center justify-between text-sm">
+                <span className="flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: DISPO_COLORS[s.name] || "#94a3b8" }} />
                   {s.name}
                 </span>
                 <span className="font-mono font-semibold tabular-nums">{num(s.value)}</span>
