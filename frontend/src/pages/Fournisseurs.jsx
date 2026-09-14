@@ -1,24 +1,30 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from "recharts";
-import { Truck, ExternalLink, BadgeCheck, Globe } from "lucide-react";
+import { Truck, ExternalLink, BadgeCheck, Globe, UploadCloud } from "lucide-react";
 import { api } from "@/lib/api";
 import { eur, num } from "@/lib/format";
 import { LOT_PALETTE } from "@/lib/colors";
+import { Button } from "@/components/ui/button";
+import ImportFournisseurDialog from "@/components/ImportFournisseurDialog";
 
 export default function Fournisseurs() {
   const [rows, setRows] = useState([]);
-  useEffect(() => { api.bySupplier().then(setRows); }, []);
+  const charger = () => api.bySupplier().then(setRows);
+  useEffect(() => { charger(); }, []);
 
   const chart = rows.map((r) => ({ name: r.fournisseur, articles: r.articles }));
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight">Analyse fournisseurs</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {rows.length} enseignes · comparaison prix moyens et couverture catalogue.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight">Analyse fournisseurs</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {rows.length} enseignes · comparaison prix moyens et couverture catalogue.
+          </p>
+        </div>
+        <ImportFournisseurDialog onImported={charger} />
       </header>
 
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
@@ -71,6 +77,15 @@ export default function Fournisseurs() {
                 <ExternalLink className="h-3 w-3" />
               </a>
             )}
+            <ImportFournisseurDialog
+              fournisseurParDefaut={r.fournisseur}
+              onImported={charger}
+              trigger={
+                <Button variant="ghost" size="sm" className="mt-3 w-full justify-start gap-1.5 px-0 text-xs text-muted-foreground hover:text-foreground">
+                  <UploadCloud className="h-3.5 w-3.5" /> Mettre à jour ce catalogue
+                </Button>
+              }
+            />
           </motion.div>
         ))}
       </div>

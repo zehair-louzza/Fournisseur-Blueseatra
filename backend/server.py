@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime, timezone
 
 from catalogue_parser import parse_catalogue
+from supplier_import import parse_supplier_csv, appliquer_offres
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -518,6 +519,27 @@ async def import_catalogue(file: UploadFile = File(...)):
             await db[name].delete_many({})
             await db[name].insert_many([dict(d) for d in docs])
     return {"updated": updated, "added": added, "total": len(arts)}
+
+
+@api_router.post("/fournisseurs/{fournisseur}/import")
+async def import_offres_fournisseur(fournisseur: str, file: UploadFile = File(...)):
+    """Importe un catalogue fournisseur brut (CSV) tel que produit par la
+    collecte automatique (skill collecte-tarifs-fournisseurs-btp). Attache
+    chaque ligne comme OFFRE sur l'article existant correspondant — ne cree
+    jamais d'article, n'invente jamais de prix. Remplace les offres
+    precedentes de ce meme fournisseur a chaque reimport."""
+    content = await file.read()
+    try:
+        analyse = parse_supplier_csv(content, fournisseur)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Fichier illisible : {e}")
+    if not analyse["offres"]:
+        raise HTTPException(400, "Aucune ligne exploitable (désignation manquante sur toutes les lignes).")
+    resultat = await appliquer_offres(db, fournisseur, analyse["offres"])
+    resultat["lignes_lues"] = analyse["total_lu"]
+    resultat["lignes_ignorees_sans_designation"] = analyse["lignes_ignorees"]
+    resultat["lignes_sans_prix"] = analyse["sans_prix"]
+    return resultat
 
 
 class CodesBody(BaseModel):

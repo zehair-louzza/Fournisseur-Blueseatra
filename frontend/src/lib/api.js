@@ -16,6 +16,12 @@ export const api = {
   comparateur: () => client.get("/comparateur").then((r) => r.data),
   importCatalogue: (formData) =>
     client.post("/catalogue/import", formData, { headers: { "Content-Type": "multipart/form-data" } }).then((r) => r.data),
+  importSupplierCatalogue: (fournisseur, formData) =>
+    client
+      .post(`/fournisseurs/${encodeURIComponent(fournisseur)}/import`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      })
+      .then((r) => r.data),
   bestPrices: (codes) => client.post("/best-prices", { codes }).then((r) => r.data),
   alerts: () => client.get("/alerts").then((r) => r.data),
   parametres: () => client.get("/parametres").then((r) => r.data),
