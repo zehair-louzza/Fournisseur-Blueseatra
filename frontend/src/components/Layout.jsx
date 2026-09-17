@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useEstimate } from "@/lib/estimateStore";
 import { useTheme } from "@/lib/theme";
+import CompteUtilisateur from "@/components/CompteUtilisateur";
 
 const NAV = [
   { to: "/", label: "Tableau de bord", Icon: LayoutDashboard, end: true },
@@ -93,10 +94,11 @@ export const Layout = ({ children }) => {
           </div>
           <div className="hidden lg:block">
             <p className="text-xs text-muted-foreground">
-              ANELEC Groupe · Catalogue prix fournisseurs réels
+              Catalogue prix fournisseurs réels
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <CompteUtilisateur />
             <button
               onClick={toggle}
               data-testid="theme-toggle"

@@ -45,8 +45,12 @@ export default function ImportFournisseurDialog({ fournisseurParDefaut, trigger,
       formData.append("file", fichier);
       const data = await api.importSupplierCatalogue(fournisseur.trim(), formData);
       setResultat({ ok: true, data });
+      const parts = [];
+      if (data.offres_rattachees)
+        parts.push(`${data.offres_rattachees} offres rattachées`);
+      if (data.articles_crees) parts.push(`${data.articles_crees} articles créés`);
       toast.success(
-        `${fournisseur} : ${data.offres_rattachees} offres rattachées sur ${data.articles_mis_a_jour} articles.`
+        `${fournisseur} : ${parts.join(", ") || "aucune ligne exploitable"}.`
       );
       onImported?.(data);
     } catch (err) {
@@ -79,9 +83,11 @@ export default function ImportFournisseurDialog({ fournisseurParDefaut, trigger,
           <DialogTitle>Importer un catalogue fournisseur</DialogTitle>
           <DialogDescription>
             Le fichier CSV vient de votre collecte de tarifs (Rexel, Prolians, Point.P, La
-            Plateforme, SFIC…) ou de tout export fournisseur équivalent. Chaque ligne est
-            rattachée comme offre à l&apos;article correspondant de votre catalogue — aucun
-            article n&apos;est créé et aucun prix n&apos;est inventé.
+            Plateforme, SFIC…) ou de tout export fournisseur équivalent. Chaque ligne
+            rejoint le catalogue de votre société : rattachée comme offre à l&apos;article
+            correspondant s&apos;il existe déjà, créée comme nouvel article sinon. Seuls les
+            prix présents dans le fichier sont enregistrés — marge et prix de vente restent
+            vides.
           </DialogDescription>
         </DialogHeader>
 
@@ -122,13 +128,14 @@ export default function ImportFournisseurDialog({ fournisseurParDefaut, trigger,
                 <CheckCircle2 className="h-4 w-4" /> Import terminé
               </p>
               <p>Lignes lues : {resultat.data.lignes_lues}</p>
-              <p>Offres rattachées : {resultat.data.offres_rattachees}</p>
+              <p>Offres rattachées à un article existant : {resultat.data.offres_rattachees}</p>
               <p>Articles mis à jour : {resultat.data.articles_mis_a_jour}</p>
-              {resultat.data.offres_non_rattachees > 0 && (
+              <p>Nouveaux articles créés : {resultat.data.articles_crees ?? 0}</p>
+              {resultat.data.lignes_sans_prix > 0 && (
                 <p className="text-amber-600 flex items-center gap-1.5">
                   <AlertTriangle className="h-3.5 w-3.5" />
-                  {resultat.data.offres_non_rattachees} lignes sans article correspondant
-                  (aucun article créé automatiquement).
+                  {resultat.data.lignes_sans_prix} lignes sans prix dans le fichier :
+                  laissées vides, aucun prix n'est estimé.
                 </p>
               )}
             </div>

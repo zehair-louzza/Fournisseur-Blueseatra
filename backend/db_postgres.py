@@ -14,6 +14,7 @@ qu'un traducteur de pipeline generique.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import uuid
@@ -87,7 +88,11 @@ def _build_where(filtre: Optional[Dict[str, Any]], params: List[Any]) -> str:
         return "TRUE"
     morceaux = []
     for champ, valeur in filtre.items():
-        if champ == "$or":
+        if champ == "__tenant__":
+            # Colonne reelle, pas un champ du document JSON.
+            params.append(valeur)
+            morceaux.append(f"tenant_id = ${len(params)}")
+        elif champ == "$or":
             sous = [_build_where(sf, params) for sf in valeur]
             morceaux.append("(" + " OR ".join(sous) + ")")
         elif champ == "$and":
@@ -219,30 +224,42 @@ class _Resultat:
 # --------------------------------------------------------------------------
 
 class Collection:
-    def __init__(self, db: "PostgresDatabase", nom: str):
+    def __init__(self, db: "PostgresDatabase", nom: str, tenant_id: Optional[str] = None):
         self.db = db
         self.nom = nom
+        self.tenant_id = tenant_id
         self.qualified = f'"{db.schema}"."{nom}"'
+
+    def _portee(self, filtre: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Injecte le tenant dans tout filtre. C'est le point unique qui
+        garantit qu'aucune lecture ni ecriture ne franchit la frontiere
+        entre deux clients : il n'existe pas de chemin applicatif qui
+        interroge une collection sans passer par ici."""
+        if self.tenant_id is None:
+            return filtre or {}
+        base = dict(filtre or {})
+        base["__tenant__"] = self.tenant_id
+        return base
 
     # ---- lecture ----
 
     def find(self, filtre=None, projection=None) -> Cursor:
-        return Cursor(self, filtre, projection)
+        return Cursor(self, self._portee(filtre), projection)
 
     async def find_one(self, filtre=None, projection=None) -> Optional[Dict[str, Any]]:
-        resultats = await Cursor(self, filtre, projection).to_list(1)
+        resultats = await Cursor(self, self._portee(filtre), projection).to_list(1)
         return resultats[0] if resultats else None
 
     async def count_documents(self, filtre=None) -> int:
         params: List[Any] = []
-        where = _build_where(filtre, params)
+        where = _build_where(self._portee(filtre), params)
         return await self.db.fetchval(
             f"SELECT count(*) FROM {self.qualified} WHERE {where}", *params
         )
 
     async def distinct(self, champ: str, filtre=None) -> List[Any]:
         params: List[Any] = []
-        where = _build_where(filtre, params)
+        where = _build_where(self._portee(filtre), params)
         lignes = await self.db.fetch(
             f"SELECT DISTINCT doc->>'{champ}' AS v FROM {self.qualified} WHERE {where}",
             *params,
@@ -252,13 +269,18 @@ class Collection:
     # ---- ecriture ----
 
     def _identifiant(self, doc: Dict[str, Any]) -> str:
-        return str(doc.get("id") or doc.get("code") or uuid.uuid4())
+        """La cle primaire est globale a la table : deux tenants pouvant
+        legitimement utiliser le meme code article, l'identifiant est
+        prefixe par le tenant."""
+        naturel = doc.get("id") or doc.get("code") or str(uuid.uuid4())
+        return f"{self.tenant_id}:{naturel}" if self.tenant_id else str(naturel)
 
     async def insert_one(self, doc: Dict[str, Any]) -> _Resultat:
         doc = {k: v for k, v in doc.items() if k != "_id"}
         await self.db.execute(
-            f"INSERT INTO {self.qualified} (id, doc) VALUES ($1, $2::jsonb)",
+            f"INSERT INTO {self.qualified} (id, tenant_id, doc) VALUES ($1, $2, $3::jsonb)",
             self._identifiant(doc),
+            self.tenant_id,
             json.dumps(doc),
         )
         return _Resultat(matched=1, modified=1)
@@ -267,11 +289,11 @@ class Collection:
         lignes = []
         for d in docs:
             d = {k: v for k, v in dict(d).items() if k != "_id"}
-            lignes.append((self._identifiant(d), json.dumps(d)))
+            lignes.append((self._identifiant(d), self.tenant_id, json.dumps(d)))
         if not lignes:
             return _Resultat()
         await self.db.executemany(
-            f"INSERT INTO {self.qualified} (id, doc) VALUES ($1, $2::jsonb) "
+            f"INSERT INTO {self.qualified} (id, tenant_id, doc) VALUES ($1, $2, $3::jsonb) "
             f"ON CONFLICT (id) DO UPDATE SET doc = EXCLUDED.doc",
             lignes,
         )
@@ -282,7 +304,7 @@ class Collection:
             raise NotImplementedError("Seul $set est supporte")
         modifications = {k: v for k, v in update["$set"].items() if k != "_id"}
         params: List[Any] = [json.dumps(modifications)]
-        where = _build_where(filtre, params)
+        where = _build_where(self._portee(filtre), params)
         # `||` fusionne au premier niveau : c'est exactement la semantique de
         # $set sur des champs de premier niveau, seuls utilises ici.
         sql = (
@@ -296,7 +318,7 @@ class Collection:
     async def replace_one(self, filtre, doc, upsert: bool = False) -> _Resultat:
         doc = {k: v for k, v in dict(doc).items() if k != "_id"}
         params: List[Any] = [json.dumps(doc)]
-        where = _build_where(filtre, params)
+        where = _build_where(self._portee(filtre), params)
         resultat = await self.db.execute(
             f"UPDATE {self.qualified} SET doc = $1::jsonb "
             f"WHERE id = (SELECT id FROM {self.qualified} WHERE {where} LIMIT 1)",
@@ -310,7 +332,7 @@ class Collection:
 
     async def delete_one(self, filtre) -> _Resultat:
         params: List[Any] = []
-        where = _build_where(filtre, params)
+        where = _build_where(self._portee(filtre), params)
         resultat = await self.db.execute(
             f"DELETE FROM {self.qualified} "
             f"WHERE id = (SELECT id FROM {self.qualified} WHERE {where} LIMIT 1)",
@@ -320,7 +342,7 @@ class Collection:
 
     async def delete_many(self, filtre) -> _Resultat:
         params: List[Any] = []
-        where = _build_where(filtre, params)
+        where = _build_where(self._portee(filtre), params)
         resultat = await self.db.execute(
             f"DELETE FROM {self.qualified} WHERE {where}", *params
         )
@@ -343,17 +365,50 @@ class PostgresDatabase:
         self.dsn = dsn
         self.schema = schema
         self._pool: Optional[asyncpg.Pool] = None
+        self._boucle = None
+        self._parent: Optional["PostgresDatabase"] = None
+        self.tenant_id: Optional[str] = None
 
     def __getitem__(self, nom: str) -> Collection:
-        return Collection(self, nom)
+        return Collection(self, nom, self.tenant_id)
+
+    # Attributs de l'objet lui-meme : sans cette garde, un acces a un
+    # attribut non encore initialise renverrait une "collection" du meme nom
+    # au lieu de lever une erreur, et une requete partirait sans portee.
+    _ATTRIBUTS = {"dsn", "schema", "tenant_id"}
 
     def __getattr__(self, nom: str) -> Collection:
-        if nom.startswith("_"):
+        if nom.startswith("_") or nom in PostgresDatabase._ATTRIBUTS:
             raise AttributeError(nom)
-        return Collection(self, nom)
+        return Collection(self, nom, self.tenant_id)
+
+    def for_tenant(self, tenant_id: str) -> "PostgresDatabase":
+        """Vue de la base restreinte a un tenant. Le pool de connexions est
+        partage ; seule la portee des requetes change."""
+        vue = PostgresDatabase.__new__(PostgresDatabase)
+        vue.dsn = self.dsn
+        vue.schema = self.schema
+        vue._pool = None
+        vue._boucle = None
+        vue._parent = self
+        vue.tenant_id = tenant_id
+        return vue
 
     async def pool(self) -> asyncpg.Pool:
+        if self._parent is not None:
+            return await self._parent.pool()
+
+        # Un pool asyncpg appartient a la boucle evenementielle qui l'a cree.
+        # Reutilise depuis une autre boucle, il echoue par "another operation
+        # is in progress", une erreur trompeuse qui ne designe pas la vraie
+        # cause. On recree donc le pool si la boucle a change.
+        boucle = asyncio.get_running_loop()
+        if self._pool is not None and self._boucle is not boucle:
+            self._pool = None
+            self._boucle = None
+
         if self._pool is None:
+            self._boucle = boucle
             self._pool = await asyncpg.create_pool(
                 self.dsn,
                 min_size=1,
@@ -395,3 +450,4 @@ class PostgresDatabase:
         if self._pool is not None:
             await self._pool.close()
             self._pool = None
+            self._boucle = None

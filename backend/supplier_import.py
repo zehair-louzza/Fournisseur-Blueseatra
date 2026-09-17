@@ -4,14 +4,18 @@ Concu pour les exports produits par la collecte automatique par API
 (Rexel/Prolians/La Plateforme/SFIC/Point.P) : une ligne = un produit chez UN
 fournisseur, colonnes en francais avec des noms variables selon la source.
 
-Ne cree jamais d'article : une offre ne s'attache qu'a un article existant,
-identifie par rapprochement MARQUE + REFERENCE FABRICANT (jamais la reference
-seule : un meme numero designe des produits differents selon le fabricant),
-avec repli sur une correspondance approchee du libelle si aucune reference
-n'est exploitable. Les lignes sans correspondance sont renvoyees telles
-quelles pour that l'utilisateur decide (ignorer / creer manuellement).
+Une offre s'attache a l'article existant identifie par rapprochement
+MARQUE + REFERENCE FABRICANT (jamais la reference seule : un meme numero
+designe des produits differents selon le fabricant), avec repli sur une
+correspondance approchee du libelle si aucune reference n'est exploitable.
+
+Les lignes sans correspondance creent un article dans le catalogue du client,
+ce qui permet a un compte vide de constituer son catalogue par simple import.
+Aucun prix n'est jamais invente : seuls les prix presents dans le fichier sont
+enregistres, et la marge comme le prix de vente restent vides.
 """
 import csv
+import hashlib
 import io
 import re
 import unicodedata
@@ -36,6 +40,7 @@ ALIAS = {
     "ean": ["Code EAN", "ean", "code EAN"],
     "fiche_produit": ["Fiche produit", "URL"],
     "delai": ["Delai de livraison", "Délai", "Delai", "delay", "disponibilité"],
+    "famille": ["Famille", "famille", "Categorie", "Catégorie", "category", "rayon"],
 }
 
 
@@ -124,18 +129,108 @@ def parse_supplier_csv(content: bytes, fournisseur: str) -> dict:
             "ean": _get(row, cols, "ean"),
             "fiche_produit": _get(row, cols, "fiche_produit"),
             "retrait": _get(row, cols, "delai"),
+            "famille": _get(row, cols, "famille"),
             "importe_le": horodatage,
         })
     return {"offres": offres, "lignes_ignorees": ignorees, "sans_prix": sans_prix,
             "total_lu": len(offres) + ignorees}
 
 
-async def appliquer_offres(db, fournisseur: str, offres: list) -> dict:
+def _offre_formatee(o: dict) -> dict:
+    """Represente une ligne de catalogue fournisseur comme une offre."""
+    return {
+        "fournisseur": o["fournisseur"],
+        "type_prix": "Prix net HT collecté",
+        "prix_ht": o["prix_ht"],
+        "prix_public": o["prix_public"],
+        "remise": None,
+        "designation": o["designation"],
+        "marque": o["marque"],
+        "ref_fournisseur": o["reference_fournisseur"],
+        "unite_vente": o["unite_vente"],
+        "conditionnement": None,
+        "retrait": o["retrait"],
+        "fiabilite": "Collecte automatique",
+        "fiche_produit": o["fiche_produit"],
+        "rang": None,
+        "importe_le": o["importe_le"],
+    }
+
+
+def _code_article(o: dict, deja_pris: set) -> str:
+    """Code unique et stable pour un article cree a l'import.
+
+    On reprend la reference fournisseur quand elle existe : au reimport, le
+    meme produit retrouve ainsi le meme code au lieu d'etre duplique.
+    """
+    base = (o.get("reference_fournisseur") or o.get("reference_fabricant") or "").strip()
+    if base:
+        racine = re.sub(r"[^A-Za-z0-9._-]", "", base).upper()[:40] or "IMPORT"
+    else:
+        racine = "IMP-" + hashlib.sha1(
+            _norm(o["designation"]).encode("utf-8")
+        ).hexdigest()[:10].upper()
+
+    code = racine
+    suffixe = 2
+    while code in deja_pris:
+        code = f"{racine}-{suffixe}"
+        suffixe += 1
+    return code
+
+
+def _article_depuis_offre(o: dict, code: str) -> dict:
+    """Fiche article creee a partir d'une ligne importee.
+
+    Le prix d'achat est celui du fichier, jamais un prix estime. La marge et
+    le prix de vente restent volontairement VIDES : ils relevent d'une
+    decision commerciale, pas de la collecte.
+    """
+    return {
+        "code": code,
+        "lot": o.get("famille") or "Import fournisseur",
+        "sous_famille": o.get("famille"),
+        "article": o["designation"],
+        "unite": o.get("unite_vente"),
+        "designation_fournisseur": o["designation"],
+        "marque": o.get("marque"),
+        "ref_fabricant": o.get("reference_fabricant"),
+        "ref_fournisseur": o.get("reference_fournisseur"),
+        "fournisseur_retenu": o["fournisseur"],
+        "prix_achat_ht": o.get("prix_ht"),
+        "type_prix": "Prix net HT collecté",
+        "prix_public_ref": o.get("prix_public"),
+        "remise": None,
+        "fiabilite": "Collecte automatique",
+        "statut": "a_verifier" if o.get("prix_ht") is not None else "a_completer",
+        "marge_pct": None,
+        "prix_vente_ht": None,
+        "tva_pct": None,
+        "fiche_produit": o.get("fiche_produit"),
+        "offers": [_offre_formatee(o)],
+    }
+
+
+async def appliquer_offres(db, fournisseur: str, offres: list,
+                           creer_articles: bool = True) -> dict:
     """Attache chaque offre a l'article correspondant (par ref_key, puis par
     libelle approche), en REMPLACANT toute offre precedente de ce meme
     fournisseur sur cet article (pas d'accumulation de doublons a chaque
-    reimport). Retourne un compte-rendu, n'invente jamais de prix ni
-    d'article."""
+    reimport).
+
+    Les lignes sans correspondance creent un nouvel article dans le catalogue
+    du client : un compte vide constitue ainsi son catalogue par simple
+    import. Aucun prix n'est invente, seuls ceux du fichier sont enregistres."""
+    # Garde-fou : recevoir une base non restreinte a un client ferait lire et
+    # ecrire cet import dans le catalogue de TOUS les clients. Le defaut est
+    # invisible a l'execution (l'import renvoie un compte-rendu plausible),
+    # d'ou le refus explicite plutot qu'une confiance dans l'appelant.
+    if getattr(db, "tenant_id", None) is None:
+        raise ValueError(
+            "appliquer_offres exige une base restreinte a un client "
+            "(db.for_tenant(...)) : refus d'ecrire sans cloisonnement."
+        )
+
     # index des articles existants par cle de rapprochement et par libelle normalise
     curseur = db.articles.find(
         {}, {"_id": 0, "code": 1, "marque": 1, "ref_fabricant": 1, "article": 1,
@@ -162,11 +257,7 @@ async def appliquer_offres(db, fournisseur: str, offres: list) -> dict:
             par_code.setdefault(code, []).append(o)
             rattachees += 1
         else:
-            non_rattachees.append({
-                "designation": o["designation"], "marque": o["marque"],
-                "reference_fabricant": o["reference_fabricant"],
-                "prix_ht": o["prix_ht"],
-            })
+            non_rattachees.append(o)
 
     for code, nouvelles in par_code.items():
         article = await db.articles.find_one({"code": code}, {"offers": 1})
@@ -175,30 +266,32 @@ async def appliquer_offres(db, fournisseur: str, offres: list) -> dict:
             if off.get("fournisseur") != fournisseur
         ]
         for o in nouvelles:
-            offres_actuelles.append({
-                "fournisseur": o["fournisseur"],
-                "type_prix": "Prix net HT collecté",
-                "prix_ht": o["prix_ht"],
-                "prix_public": o["prix_public"],
-                "remise": None,
-                "designation": o["designation"],
-                "marque": o["marque"],
-                "ref_fournisseur": o["reference_fournisseur"],
-                "unite_vente": o["unite_vente"],
-                "conditionnement": None,
-                "retrait": o["retrait"],
-                "fiabilite": "Collecte automatique",
-                "fiche_produit": o["fiche_produit"],
-                "rang": None,
-                "importe_le": o["importe_le"],
-            })
+            offres_actuelles.append(_offre_formatee(o))
         await db.articles.update_one({"code": code}, {"$set": {"offers": offres_actuelles}})
+
+    # Creation des articles absents du catalogue du client
+    crees = 0
+    if creer_articles and non_rattachees:
+        codes_pris = set(par_ref.values()) | set(par_libelle.values())
+        nouveaux = []
+        for o in non_rattachees:
+            code = _code_article(o, codes_pris)
+            codes_pris.add(code)
+            nouveaux.append(_article_depuis_offre(o, code))
+        if nouveaux:
+            await db.articles.insert_many(nouveaux)
+            crees = len(nouveaux)
 
     return {
         "fournisseur": fournisseur,
         "offres_traitees": len(offres),
         "offres_rattachees": rattachees,
         "articles_mis_a_jour": len(par_code),
-        "offres_non_rattachees": len(non_rattachees),
-        "exemples_non_rattaches": non_rattachees[:20],
+        "articles_crees": crees,
+        "offres_non_rattachees": len(non_rattachees) - crees,
+        "exemples_non_rattaches": [
+            {"designation": o["designation"], "marque": o["marque"],
+             "reference_fabricant": o["reference_fabricant"], "prix_ht": o["prix_ht"]}
+            for o in (non_rattachees[:20] if not creer_articles else [])
+        ],
     }

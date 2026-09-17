@@ -33,6 +33,10 @@ profitant des index et des agrégations SQL de Postgres.
 | `DB_SCHEMA` | non | Schéma, par défaut `fournisseur` |
 | `CORS_ORIGINS` | non | Origines autorisées, séparées par des virgules. Par défaut `*` — à restreindre à l'URL du frontend. |
 | `DB_POOL_MAX` | non | Taille max du pool, par défaut 5 |
+| `SUPABASE_URL` | oui | URL du projet Supabase (vérification des jetons) |
+| `SUPABASE_ANON_KEY` | oui | Clé publiable Supabase |
+| `SEED_TENANT_ID` | non | Société recevant le catalogue de démarrage. **Sans elle, aucun amorçage** : chaque nouveau compte part d'un catalogue vide, ce qui est le comportement attendu. |
+| `AUTH_CACHE_SECONDS` | non | Durée de cache d'un jeton validé, par défaut 300 |
 
 Passer par le **pooler** (`aws-0-eu-west-1.pooler.supabase.com`) et non par
 `db.<ref>.supabase.co` : la connexion directe est en IPv6, que Render ne route
@@ -43,6 +47,8 @@ pas en sortie.
 | Variable | Obligatoire | Description |
 |---|---|---|
 | `REACT_APP_BACKEND_URL` | oui | URL publique du backend, sans `/api` final |
+| `REACT_APP_SUPABASE_URL` | oui | URL du projet Supabase |
+| `REACT_APP_SUPABASE_ANON_KEY` | oui | Clé publiable Supabase |
 
 Cette variable est lue **au moment du build**, pas à l'exécution : après l'avoir
 changée, il faut relancer un build du site statique.
@@ -54,6 +60,25 @@ démarrage `uvicorn server:app --host 0.0.0.0 --port $PORT`,
 contrôle de santé `/api/health`.
 
 Frontend — build `npm install && npm run build`, dossier publié `build`.
+
+## Cloisonnement par société
+
+L'utilisateur se connecte avec son compte Supabase (le même que sur le SaaS).
+Le backend ne vérifie pas la signature du jeton lui-même : il interroge Supabase
+Auth, seule autorité sur sa validité. Cela évite de détenir le secret de
+signature du projet.
+
+La société est ensuite lue dans `blueseatra.tenant_users`. Une politique de
+lecture seule (`fournisseur_app_lecture`) autorise le rôle applicatif à lire
+cette table et `company_profiles` — rien d'autre du schéma de production.
+
+**Toute** lecture et écriture passe par `db.for_tenant(...)`, qui injecte la
+société dans chaque requête. Un code article n'est unique que dans le périmètre
+d'une société : deux clients peuvent légitimement utiliser le même.
+
+`appliquer_offres` **refuse** une base non cloisonnée. Ce garde-fou vient d'un
+défaut réel : l'import avait été branché sur la base globale et son compte-rendu
+restait plausible alors que l'écriture partait chez une autre société.
 
 ## Amorçage des données
 

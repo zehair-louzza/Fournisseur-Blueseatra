@@ -1,11 +1,27 @@
 import axios from "axios";
+import { supabase } from "@/lib/auth";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
 
 const client = axios.create({ baseURL: API });
 
+// Chaque appel porte le jeton Supabase de l'utilisateur : c'est lui qui
+// determine, cote serveur, quel catalogue est lu ou modifie. Le jeton est
+// relu a chaque requete car il est renouvele automatiquement en arriere-plan.
+client.interceptors.request.use(async (config) => {
+  if (supabase) {
+    const { data } = await supabase.auth.getSession();
+    const token = data?.session?.access_token;
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+  }
+  const tenant = localStorage.getItem("tenant_id");
+  if (tenant) config.headers["X-Tenant-Id"] = tenant;
+  return config;
+});
+
 export const api = {
+  me: () => client.get("/me").then((r) => r.data),
   filters: () => client.get("/filters").then((r) => r.data),
   catalogue: (params) => client.get("/catalogue", { params }).then((r) => r.data),
   article: (code) => client.get(`/catalogue/${code}`).then((r) => r.data),
