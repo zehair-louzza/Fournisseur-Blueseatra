@@ -59,6 +59,11 @@ Backend — build `pip install -r requirements.txt`,
 démarrage `uvicorn server:app --host 0.0.0.0 --port $PORT`,
 contrôle de santé `/api/health`.
 
+Ces deux commandes s'exécutent **depuis la racine du dépôt**, pas depuis
+`backend/`. La racine porte donc un `requirements.txt` qui délègue à
+`backend/requirements.txt`, et un `server.py` qui charge l'application réelle.
+En local, `cd backend && uvicorn server:app` reste équivalent.
+
 Frontend — build `npm install && npm run build`, dossier publié `build`.
 
 ## Cloisonnement par société

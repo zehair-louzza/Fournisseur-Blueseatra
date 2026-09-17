@@ -17,14 +17,7 @@ from auth import base_du_tenant, identite_courante, Identite
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-from db_postgres import PostgresDatabase
-
-# Stockage Postgres (Supabase), schema dedie `fournisseur` : isole des
-# tables de production du SaaS, qui vivent dans le schema `blueseatra`.
-db = PostgresDatabase(
-    os.environ['DATABASE_URL'],
-    schema=os.environ.get('DB_SCHEMA', 'fournisseur'),
-)
+from database import db
 
 app = FastAPI(title="BlueSeaTra — Gestion Achats TCE")
 api_router = APIRouter(prefix="/api")

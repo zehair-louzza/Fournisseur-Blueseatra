@@ -1,0 +1,3 @@
+# Render execute le build depuis la racine du depot ; les dependances reelles
+# sont declarees dans backend/.
+-r backend/requirements.txt

@@ -17,6 +17,8 @@ from typing import Dict, Optional, Tuple
 import httpx
 from fastapi import Depends, Header, HTTPException
 
+from database import db
+
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
 
@@ -77,8 +79,6 @@ async def identite_courante(
 
     user_id, email = await _utilisateur_depuis_jeton(jeton)
 
-    from server import db  # import differe : evite un cycle a l'import
-
     lignes = await db.raw(
         "SELECT tenant_id FROM blueseatra.tenant_users WHERE user_id = $1", user_id
     )
@@ -104,6 +104,4 @@ async def identite_courante(
 
 async def base_du_tenant(identite: Identite = Depends(identite_courante)):
     """Dependance FastAPI : base de donnees restreinte au tenant appelant."""
-    from server import db
-
     return db.for_tenant(identite.tenant_id)
