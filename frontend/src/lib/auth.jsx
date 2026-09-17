@@ -1,64 +1,88 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY;
+// Les comptes vivent dans le SaaS Blueseatra : la connexion s'y fait
+// directement, avec les mêmes identifiants que sur la plateforme. Cette
+// application ne gère ni compte ni mot de passe.
+export const SAAS_API_URL = (process.env.REACT_APP_SAAS_API_URL || "").replace(/\/$/, "");
 
-// Le client n'est cree que si la configuration est presente : cela permet a
-// l'application de rendre un message clair plutot que de planter au montage
-// quand les variables de build manquent.
-export const supabase =
-  SUPABASE_URL && SUPABASE_ANON_KEY
-    ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-    : null;
+const CLE_JETON = "blueseatra_token";
+const CLE_TENANT = "tenant_id";
+
+export const jetonStocke = () => localStorage.getItem(CLE_JETON);
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [session, setSession] = useState(null);
+  const [jeton, setJeton] = useState(() => localStorage.getItem(CLE_JETON));
   const [chargement, setChargement] = useState(true);
-  const [tenantId, setTenantId] = useState(
-    () => localStorage.getItem("tenant_id") || null
-  );
 
   useEffect(() => {
-    if (!supabase) {
-      setChargement(false);
-      return;
-    }
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session ?? null);
-      setChargement(false);
-    });
-    const { data: sub } = supabase.auth.onAuthStateChange((_evt, s) => {
-      setSession(s);
-      if (!s) {
-        setTenantId(null);
-        localStorage.removeItem("tenant_id");
+    // Un jeton peut avoir expiré depuis la dernière visite : on le confronte
+    // au SaaS avant de monter l'application, plutôt que de laisser chaque
+    // écran échouer séparément.
+    const verifier = async () => {
+      if (!jeton || !SAAS_API_URL) {
+        setChargement(false);
+        return;
       }
-    });
-    return () => sub.subscription.unsubscribe();
+      try {
+        const r = await fetch(`${SAAS_API_URL}/api/auth/me`, {
+          headers: { Authorization: `Bearer ${jeton}` },
+        });
+        if (!r.ok) deconnexion();
+      } catch {
+        // SaaS injoignable : on garde la session, l'utilisateur verra
+        // l'erreur au premier appel plutôt que d'être déconnecté à tort.
+      }
+      setChargement(false);
+    };
+    verifier();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const choisirTenant = (id) => {
-    setTenantId(id);
-    if (id) localStorage.setItem("tenant_id", id);
-    else localStorage.removeItem("tenant_id");
+  const connexion = async (email, motDePasse) => {
+    if (!SAAS_API_URL) {
+      throw new Error(
+        "Configuration absente : REACT_APP_SAAS_API_URL doit être définie au moment du build."
+      );
+    }
+    const r = await fetch(`${SAAS_API_URL}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email.trim(), password: motDePasse }),
+    });
+    if (r.status === 401) throw new Error("Identifiants incorrects.");
+    if (r.status === 403) throw new Error("Ce compte n'est rattaché à aucune société.");
+    if (!r.ok) throw new Error("Connexion impossible pour le moment.");
+
+    const data = await r.json();
+    localStorage.setItem(CLE_JETON, data.token);
+    if (data.tenant?.id) localStorage.setItem(CLE_TENANT, data.tenant.id);
+    setJeton(data.token);
+    return data;
   };
 
-  const deconnexion = async () => {
-    if (supabase) await supabase.auth.signOut();
+  const deconnexion = () => {
+    localStorage.removeItem(CLE_JETON);
+    localStorage.removeItem(CLE_TENANT);
+    setJeton(null);
+  };
+
+  const choisirTenant = (id) => {
+    if (id) localStorage.setItem(CLE_TENANT, id);
+    else localStorage.removeItem(CLE_TENANT);
   };
 
   return (
     <AuthContext.Provider
       value={{
-        session,
+        jeton,
+        session: jeton,
         chargement,
-        tenantId,
-        choisirTenant,
+        connexion,
         deconnexion,
-        configure: Boolean(supabase),
+        choisirTenant,
+        configure: Boolean(SAAS_API_URL),
       }}
     >
       {children}
@@ -68,6 +92,6 @@ export function AuthProvider({ children }) {
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth doit etre utilise dans AuthProvider");
+  if (!ctx) throw new Error("useAuth doit être utilisé dans AuthProvider");
   return ctx;
 }

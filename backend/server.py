@@ -155,26 +155,13 @@ async def on_startup():
 
 @api_router.get("/me")
 async def me(identite: Identite = Depends(identite_courante)):
-    """Identite de l'appelant et societe active. Sert a l'interface pour
-    afficher le compte connecte et verifier que la session est valide."""
-    lignes = await db.raw(
-        "SELECT tenant_id FROM blueseatra.tenant_users WHERE user_id = $1",
-        identite.user_id,
-    )
-    tenants = sorted({l["tenant_id"] for l in lignes})
-    noms = await db.raw(
-        "SELECT tenant_id, company_name FROM blueseatra.company_profiles "
-        "WHERE tenant_id = ANY($1::text[])",
-        tenants,
-    )
-    libelles = {n["tenant_id"]: n["company_name"] for n in noms}
+    """Identite de l'appelant et societe active, telles que le SaaS les
+    declare. Sert a l'interface pour afficher le compte connecte et verifier
+    que la session est toujours valide."""
     return {
         "email": identite.email,
         "tenant_id": identite.tenant_id,
-        "societes": [
-            {"tenant_id": t, "nom": libelles.get(t) or "Société sans nom"}
-            for t in tenants
-        ],
+        "societes": identite.societes,
     }
 
 

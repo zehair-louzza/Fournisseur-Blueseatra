@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Loader2, LogIn, AlertTriangle } from "lucide-react";
-import { supabase } from "@/lib/auth";
+import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export default function Connexion() {
+  const { connexion } = useAuth();
   const [email, setEmail] = useState("");
   const [motDePasse, setMotDePasse] = useState("");
   const [enCours, setEnCours] = useState(false);
@@ -12,26 +13,15 @@ export default function Connexion() {
 
   const soumettre = async (e) => {
     e.preventDefault();
-    if (!supabase) {
-      setErreur(
-        "Configuration d'authentification absente. Les variables REACT_APP_SUPABASE_URL et REACT_APP_SUPABASE_ANON_KEY doivent être définies au moment du build."
-      );
-      return;
-    }
     setEnCours(true);
     setErreur(null);
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password: motDePasse,
-    });
-    if (error) {
-      setErreur(
-        error.message === "Invalid login credentials"
-          ? "Identifiants incorrects."
-          : error.message
-      );
+    try {
+      await connexion(email, motDePasse);
+    } catch (err) {
+      setErreur(err.message || "Connexion impossible pour le moment.");
+    } finally {
+      setEnCours(false);
     }
-    setEnCours(false);
   };
 
   return (
@@ -42,8 +32,8 @@ export default function Connexion() {
             Catalogue fournisseurs
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Connectez-vous avec votre compte Blueseatra. Vous ne voyez que le
-            catalogue de votre société.
+            Connectez-vous avec vos identifiants Blueseatra, les mêmes que sur la
+            plateforme. Vous ne voyez que le catalogue de votre société.
           </p>
         </div>
 

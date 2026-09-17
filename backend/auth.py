@@ -1,107 +1,114 @@
-"""Authentification et resolution du tenant.
+"""Authentification deleguee au SaaS Blueseatra.
 
-Le client se connecte avec son compte Supabase (le meme que sur le SaaS) et
-transmet son jeton. Le backend ne verifie pas la signature lui-meme : il
-interroge Supabase Auth, qui est la seule autorite sur la validite d'un
-jeton. Cela evite d'avoir a detenir le secret de signature du projet.
+Les comptes vivent dans le SaaS, pas ici : c'est lui qui detient les mots de
+passe et qui signe les jetons. Cette application ne duplique donc ni compte ni
+mot de passe. Elle presente le jeton recu a `/api/auth/me` du SaaS, seule
+autorite sur sa validite, et en deduit l'utilisateur et sa societe.
 
-Le tenant est ensuite lu dans `blueseatra.tenant_users`, la table qui fait
-deja autorite cote SaaS. Aucun tenant n'est invente ni devine ici.
+Consequence voulue : aucun secret de signature n'est partage, et un compte
+desactive cote SaaS perd l'acces ici des l'expiration du cache.
 """
 from __future__ import annotations
 
 import os
 import time
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import Depends, Header, HTTPException
 
 from database import db
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
-SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
+SAAS_API_URL = os.environ.get("SAAS_API_URL", "").rstrip("/")
 
-# Duree de mise en cache d'un jeton valide. Evite un aller-retour vers
-# Supabase Auth a chaque requete tout en gardant une revocation rapide.
+# Duree de mise en cache d'un jeton valide. Evite un aller-retour vers le SaaS
+# a chaque requete tout en gardant une revocation rapide.
 DUREE_CACHE = int(os.environ.get("AUTH_CACHE_SECONDS", "300"))
 
-_cache: Dict[str, Tuple[float, str, str]] = {}  # jeton -> (peremption, user_id, email)
+_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 
 
-async def _utilisateur_depuis_jeton(jeton: str) -> Tuple[str, str]:
-    """Retourne (user_id, email) si le jeton est valide, sinon leve 401."""
+async def _profil_depuis_jeton(jeton: str) -> Dict[str, Any]:
+    """Retourne le profil renvoye par le SaaS, ou leve 401."""
     entree = _cache.get(jeton)
     if entree and entree[0] > time.time():
-        return entree[1], entree[2]
+        return entree[1]
 
-    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+    if not SAAS_API_URL:
         raise HTTPException(
             500,
-            "Authentification non configuree : SUPABASE_URL et SUPABASE_ANON_KEY "
-            "doivent etre definies cote serveur.",
+            "Authentification non configuree : SAAS_API_URL doit etre definie "
+            "cote serveur.",
         )
 
-    async with httpx.AsyncClient(timeout=10) as http:
-        reponse = await http.get(
-            f"{SUPABASE_URL}/auth/v1/user",
-            headers={"Authorization": f"Bearer {jeton}", "apikey": SUPABASE_ANON_KEY},
-        )
+    try:
+        async with httpx.AsyncClient(timeout=30) as http:
+            reponse = await http.get(
+                f"{SAAS_API_URL}/api/auth/me",
+                headers={"Authorization": f"Bearer {jeton}"},
+            )
+    except httpx.RequestError as e:
+        # Le SaaS injoignable n'est pas un probleme d'identifiants : le dire
+        # clairement evite d'envoyer l'utilisateur se reconnecter pour rien.
+        raise HTTPException(503, f"Service d'authentification injoignable : {e}")
 
-    if reponse.status_code != 200:
+    if reponse.status_code == 401:
         raise HTTPException(401, "Session expiree ou invalide. Reconnectez-vous.")
+    if reponse.status_code != 200:
+        raise HTTPException(503, "Le service d'authentification a repondu une erreur.")
 
-    donnees = reponse.json()
-    user_id = donnees.get("id")
-    if not user_id:
-        raise HTTPException(401, "Jeton sans identifiant utilisateur.")
+    profil = reponse.json()
+    if not (profil.get("tenant") or {}).get("id"):
+        raise HTTPException(403, "Ce compte n'est rattache a aucune societe.")
 
-    email = donnees.get("email") or ""
-    _cache[jeton] = (time.time() + DUREE_CACHE, user_id, email)
-    return user_id, email
+    _cache[jeton] = (time.time() + DUREE_CACHE, profil)
+    return profil
 
 
 class Identite:
-    def __init__(self, user_id: str, email: str, tenant_id: str):
+    def __init__(self, user_id: str, email: str, tenant_id: str,
+                 societes: Optional[List[Dict[str, str]]] = None):
         self.user_id = user_id
         self.email = email
         self.tenant_id = tenant_id
+        self.societes = societes or []
 
 
 async def identite_courante(
     authorization: Optional[str] = Header(None),
     x_tenant_id: Optional[str] = Header(None),
 ) -> Identite:
-    """Dependance FastAPI : identifie l'appelant et son tenant."""
+    """Dependance FastAPI : identifie l'appelant et sa societe active."""
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(401, "Authentification requise.")
     jeton = authorization.split(" ", 1)[1].strip()
 
-    user_id, email = await _utilisateur_depuis_jeton(jeton)
+    profil = await _profil_depuis_jeton(jeton)
+    utilisateur = profil.get("user") or {}
+    active = profil.get("tenant") or {}
+    societes = [
+        {"tenant_id": t["id"], "nom": t.get("name") or "Societe sans nom"}
+        for t in (profil.get("tenants") or [])
+        if t.get("id")
+    ]
 
-    lignes = await db.raw(
-        "SELECT tenant_id FROM blueseatra.tenant_users WHERE user_id = $1", user_id
-    )
-    tenants = [l["tenant_id"] for l in lignes]
-    if not tenants:
-        raise HTTPException(
-            403,
-            "Ce compte n'est rattache a aucune societe. Contactez votre "
-            "administrateur Blueseatra.",
-        )
-
-    # Un utilisateur peut appartenir a plusieurs societes : il choisit
-    # laquelle via l'en-tete, sinon la premiere par defaut.
-    if x_tenant_id:
-        if x_tenant_id not in tenants:
+    tenant_id = active["id"]
+    if x_tenant_id and x_tenant_id != tenant_id:
+        # Changement de societe : n'accepter que celles auxquelles le SaaS
+        # declare l'utilisateur rattache. Ne jamais faire confiance a l'en-tete.
+        if x_tenant_id not in {s["tenant_id"] for s in societes}:
             raise HTTPException(403, "Acces refuse a cette societe.")
         tenant_id = x_tenant_id
-    else:
-        tenant_id = sorted(tenants)[0]
 
-    return Identite(user_id, email, tenant_id)
+    return Identite(
+        user_id=utilisateur.get("id") or "",
+        email=utilisateur.get("email") or "",
+        tenant_id=tenant_id,
+        societes=societes or [{"tenant_id": tenant_id,
+                               "nom": active.get("name") or "Societe sans nom"}],
+    )
 
 
 async def base_du_tenant(identite: Identite = Depends(identite_courante)):
-    """Dependance FastAPI : base de donnees restreinte au tenant appelant."""
+    """Dependance FastAPI : base de donnees restreinte a la societe appelante."""
     return db.for_tenant(identite.tenant_id)
