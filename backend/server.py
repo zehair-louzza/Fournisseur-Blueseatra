@@ -1,7 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import json
 import logging
@@ -17,9 +16,14 @@ from supplier_import import parse_supplier_csv, appliquer_offres
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+from db_postgres import PostgresDatabase
+
+# Stockage Postgres (Supabase), schema dedie `fournisseur` : isole des
+# tables de production du SaaS, qui vivent dans le schema `blueseatra`.
+db = PostgresDatabase(
+    os.environ['DATABASE_URL'],
+    schema=os.environ.get('DB_SCHEMA', 'fournisseur'),
+)
 
 app = FastAPI(title="BlueSeaTra — Gestion Achats TCE")
 api_router = APIRouter(prefix="/api")
@@ -306,25 +310,27 @@ async def stats_overview():
 
 @api_router.get("/stats/by-lot")
 async def stats_by_lot():
-    pipeline = [
-        {"$group": {
-            "_id": "$lot",
-            "articles": {"$sum": 1},
-            "prix_moyen": {"$avg": "$prix_achat_ht"},
-            "valeur": {"$sum": {"$ifNull": ["$prix_achat_ht", 0]}},
-            "a_completer": {"$sum": {"$cond": [{"$eq": ["$statut", "a_completer"]}, 1, 0]}},
-            "a_verifier": {"$sum": {"$cond": [{"$eq": ["$statut", "a_verifier"]}, 1, 0]}},
-            "fiable": {"$sum": {"$cond": [{"$eq": ["$statut", "fiable"]}, 1, 0]}},
-        }},
-        {"$sort": {"_id": 1}},
-    ]
-    rows = await db.articles.aggregate(pipeline).to_list(100)
+    rows = await db.raw(
+        f"""
+        SELECT doc->>'lot' AS lot,
+               count(*) AS articles,
+               avg((doc->>'prix_achat_ht')::numeric) AS prix_moyen,
+               coalesce(sum((doc->>'prix_achat_ht')::numeric), 0) AS valeur,
+               count(*) FILTER (WHERE doc->>'statut' = 'a_completer') AS a_completer,
+               count(*) FILTER (WHERE doc->>'statut' = 'a_verifier')  AS a_verifier,
+               count(*) FILTER (WHERE doc->>'statut' = 'fiable')      AS fiable
+        FROM "{db.schema}"."articles"
+        GROUP BY doc->>'lot'
+        ORDER BY 1
+        LIMIT 100
+        """
+    )
     return [
         {
-            "lot": r["_id"],
+            "lot": r["lot"],
             "articles": r["articles"],
-            "prix_moyen": round(r["prix_moyen"] or 0, 2),
-            "valeur": round(r["valeur"] or 0, 2),
+            "prix_moyen": round(float(r["prix_moyen"] or 0), 2),
+            "valeur": round(float(r["valeur"] or 0), 2),
             "a_completer": r["a_completer"],
             "a_verifier": r["a_verifier"],
             "fiable": r["fiable"],
@@ -335,29 +341,32 @@ async def stats_by_lot():
 
 @api_router.get("/stats/by-supplier")
 async def stats_by_supplier():
-    pipeline = [
-        {"$match": {"fournisseur_retenu": {"$ne": None}}},
-        {"$group": {
-            "_id": "$fournisseur_retenu",
-            "articles": {"$sum": 1},
-            "prix_moyen": {"$avg": "$prix_achat_ht"},
-            "valeur": {"$sum": {"$ifNull": ["$prix_achat_ht", 0]}},
-            "votre_tarif": {"$sum": {"$cond": [
-                {"$regexMatch": {"input": {"$ifNull": ["$type_prix", ""]}, "regex": "tarif", "options": "i"}}, 1, 0]}},
-        }},
-        {"$sort": {"articles": -1}},
-    ]
-    rows = await db.articles.aggregate(pipeline).to_list(100)
+    rows = await db.raw(
+        f"""
+        SELECT doc->>'fournisseur_retenu' AS fournisseur,
+               count(*) AS articles,
+               avg((doc->>'prix_achat_ht')::numeric) AS prix_moyen,
+               coalesce(sum((doc->>'prix_achat_ht')::numeric), 0) AS valeur,
+               count(*) FILTER (
+                   WHERE coalesce(doc->>'type_prix', '') ~* 'tarif'
+               ) AS votre_tarif
+        FROM "{db.schema}"."articles"
+        WHERE doc->>'fournisseur_retenu' IS NOT NULL
+        GROUP BY doc->>'fournisseur_retenu'
+        ORDER BY articles DESC
+        LIMIT 100
+        """
+    )
     sources = await db.sources.find({}, {"_id": 0}).to_list(100)
     smap = {s["enseigne"]: s for s in sources}
     out = []
     for r in rows:
-        src = smap.get(r["_id"], {})
+        src = smap.get(r["fournisseur"], {})
         out.append({
-            "fournisseur": r["_id"],
+            "fournisseur": r["fournisseur"],
             "articles": r["articles"],
-            "prix_moyen": round(r["prix_moyen"] or 0, 2),
-            "valeur": round(r["valeur"] or 0, 2),
+            "prix_moyen": round(float(r["prix_moyen"] or 0), 2),
+            "valeur": round(float(r["valeur"] or 0), 2),
             "votre_tarif": r["votre_tarif"],
             "site": src.get("site"),
             "acces": src.get("acces"),
@@ -631,4 +640,4 @@ logging.basicConfig(level=logging.INFO)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    client.close()
+    await db.close()
