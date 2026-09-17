@@ -17,6 +17,12 @@ import { KpiCard } from "@/components/KpiCard";
 const DISPO_COLORS = { "Retrait agence": "#10b981", "Sur commande": "#f59e0b", "Autre / à préciser": "#94a3b8" };
 
 export default function Dashboard() {
+  const [societe, setSociete] = useState(null);
+  useEffect(() => {
+    api.me().then((m) => setSociete(
+      m.societes?.find((s) => s.tenant_id === m.tenant_id)?.nom ?? null
+    )).catch(() => setSociete(null));
+  }, []);
   const nav = useNavigate();
   const [ov, setOv] = useState(null);
   const [byLot, setByLot] = useState([]);
@@ -52,7 +58,9 @@ export default function Dashboard() {
           <div className="absolute inset-0 bg-gradient-to-r from-[hsl(215,45%,10%)]/95 via-[hsl(215,45%,12%)]/85 to-[hsl(215,45%,14%)]/60" />
         </div>
         <div className="relative px-6 py-8 sm:px-8 sm:py-10">
-          <p className="text-xs font-medium uppercase tracking-widest text-amber-400">Achats TCE · ANELEC Groupe</p>
+          <p className="text-xs font-medium uppercase tracking-widest text-amber-400">
+            Achats TCE{societe ? ` · ${societe}` : ""}
+          </p>
           <h1 className="mt-2 font-display text-2xl sm:text-3xl font-bold tracking-tight text-white">Tableau de bord</h1>
           <p className="mt-1 max-w-xl text-sm text-slate-300">
             Vue d'ensemble du catalogue multi-fournisseurs : offres relevées, meilleurs prix et disponibilités.

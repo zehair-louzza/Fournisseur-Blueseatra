@@ -62,7 +62,14 @@ Ces deux commandes s'exécutent **depuis la racine du dépôt**, pas depuis
 `backend/requirements.txt`, et un `server.py` qui charge l'application réelle.
 En local, `cd backend && uvicorn server:app` reste équivalent.
 
-Frontend — build `npm install && npm run build`, dossier publié `build`.
+Frontend — build `cd frontend && npm install && npm run build`, dossier publié
+`frontend/build`.
+
+Le routage utilise `HashRouter` (URLs en `/#/catalogue`). Un hébergement
+statique renvoie sinon une 404 sur toute sous-page ouverte directement ou
+rafraîchie. Pour des URLs sans `#`, ajouter dans l'onglet
+**Redirects/Rewrites** du site une règle `/*` → `/index.html` en **Rewrite**,
+puis repasser à `BrowserRouter` dans `frontend/src/App.js`.
 
 ## Cloisonnement par société
 

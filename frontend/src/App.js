@@ -1,5 +1,5 @@
 import "@/App.css";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { HashRouter, Routes, Route } from "react-router-dom";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/lib/theme";
 import { AuthProvider, useAuth } from "@/lib/auth";
@@ -29,8 +29,12 @@ function Application() {
   // catalogue ne part avant que l'utilisateur soit identifie.
   if (!session) return <Connexion />;
 
+  // HashRouter et non BrowserRouter : l'hebergement statique renvoie une 404
+  // sur toute sous-page ouverte directement ou rafraichie, tant qu'une regle
+  // de reecriture (/* -> /index.html) n'est pas posee cote hebergeur. Le
+  // routage par ancre ne depend d'aucune configuration serveur.
   return (
-    <BrowserRouter>
+    <HashRouter>
       <Layout>
             <Routes>
               <Route path="/" element={<Dashboard />} />
@@ -43,7 +47,7 @@ function Application() {
               <Route path="/parametres" element={<Parametres />} />
         </Routes>
       </Layout>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
 
