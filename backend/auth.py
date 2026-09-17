@@ -65,6 +65,36 @@ async def _profil_depuis_jeton(jeton: str) -> Dict[str, Any]:
     return profil
 
 
+async def connexion_saas(email: str, mot_de_passe: str) -> Dict[str, Any]:
+    """Relaie la connexion vers le SaaS et renvoie son jeton.
+
+    Le navigateur ne peut pas appeler le SaaS directement : son domaine n'est
+    pas dans les origines autorisees de ce service, et l'y ajouter reviendrait
+    a modifier la production. Le relais garde donc une seule origine cote
+    navigateur, sans toucher au SaaS.
+    """
+    if not SAAS_API_URL:
+        raise HTTPException(500, "SAAS_API_URL doit etre definie cote serveur.")
+
+    try:
+        async with httpx.AsyncClient(timeout=60) as http:
+            reponse = await http.post(
+                f"{SAAS_API_URL}/api/auth/login",
+                json={"email": email.strip().lower(), "password": mot_de_passe},
+            )
+    except httpx.RequestError as e:
+        raise HTTPException(503, f"Service d'authentification injoignable : {e}")
+
+    if reponse.status_code == 401:
+        raise HTTPException(401, "Identifiants incorrects.")
+    if reponse.status_code == 403:
+        raise HTTPException(403, "Ce compte n'est rattache a aucune societe.")
+    if reponse.status_code != 200:
+        raise HTTPException(503, "Le service d'authentification a repondu une erreur.")
+
+    return reponse.json()
+
+
 class Identite:
     def __init__(self, user_id: str, email: str, tenant_id: str,
                  societes: Optional[List[Dict[str, str]]] = None):

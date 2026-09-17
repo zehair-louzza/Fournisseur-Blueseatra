@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from catalogue_parser import parse_catalogue
 from supplier_import import parse_supplier_csv, appliquer_offres
-from auth import base_du_tenant, identite_courante, Identite
+from auth import base_du_tenant, identite_courante, connexion_saas, Identite
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -152,6 +152,18 @@ async def on_startup():
 
 
 # ----------------- Catalogue endpoints -----------------
+
+class ConnexionIn(BaseModel):
+    email: str
+    password: str
+
+
+@api_router.post("/auth/login")
+async def connexion(body: ConnexionIn):
+    """Relaie la connexion vers le SaaS Blueseatra, qui detient les comptes.
+    Aucun mot de passe n'est stocke ni journalise ici."""
+    return await connexion_saas(body.email, body.password)
+
 
 @api_router.get("/me")
 async def me(identite: Identite = Depends(identite_courante)):
