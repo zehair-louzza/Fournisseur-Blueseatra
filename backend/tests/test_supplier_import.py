@@ -7,6 +7,8 @@ import asyncio
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from supplier_import import parse_supplier_csv, appliquer_offres, _ref_key  # noqa: E402
@@ -82,10 +84,17 @@ class _FauxCollection:
         if code in self._articles:
             self._articles[code].update(update.get("$set", {}))
 
+    async def insert_many(self, docs):
+        for d in docs:
+            self._articles[d["code"]] = dict(d)
+
 
 class _FauseDB:
     def __init__(self, articles):
         self.articles = _FauxCollection(articles)
+        # appliquer_offres refuse une base non cloisonnee : on simule ici
+        # une base deja restreinte a un client.
+        self.tenant_id = "tenant-test"
 
 
 def test_appliquer_offres_rattache_par_marque_et_reference():
@@ -130,16 +139,47 @@ def test_appliquer_offres_reimport_remplace_sans_dupliquer():
     assert offres_finales[0]["prix_ht"] == 29.99
 
 
-def test_appliquer_offres_sans_correspondance_ne_cree_pas_darticle():
-    db = _FauseDB([])
-    offres = [{
+def _offre_sans_correspondance():
+    return {
         "ref_key": None, "reference_fournisseur": "R1", "reference_fabricant": None,
         "marque": "MarqueInconnue", "designation": "Produit jamais vu",
         "designation_norm": "produit jamais vu", "fournisseur": "Rexel",
-        "prix_ht": 10.0, "prix_public": None, "unite_vente": None, "ean": None,
-        "fiche_produit": None, "retrait": None, "importe_le": "2026-01-01T00:00:00+00:00",
-    }]
-    res = asyncio.run(appliquer_offres(db, "Rexel", offres))
+        "prix_ht": 10.0, "prix_public": None, "unite_vente": "U", "ean": None,
+        "fiche_produit": None, "retrait": None, "famille": None,
+        "importe_le": "2026-01-01T00:00:00+00:00",
+    }
+
+
+def test_ligne_sans_correspondance_cree_un_article():
+    """Un compte vide doit pouvoir constituer son catalogue par import."""
+    db = _FauseDB([])
+    res = asyncio.run(appliquer_offres(db, "Rexel", [_offre_sans_correspondance()]))
+    assert res["articles_crees"] == 1
     assert res["offres_rattachees"] == 0
+    cree = list(db.articles._articles.values())[0]
+    assert cree["article"] == "Produit jamais vu"
+    assert cree["prix_achat_ht"] == 10.0
+    assert cree["code"] == "R1"  # reprend la reference fournisseur
+    # regle absolue : la marge et le prix de vente ne sont jamais calcules
+    assert cree["marge_pct"] is None
+    assert cree["prix_vente_ht"] is None
+
+
+def test_creation_desactivable():
+    db = _FauseDB([])
+    res = asyncio.run(
+        appliquer_offres(db, "Rexel", [_offre_sans_correspondance()], creer_articles=False)
+    )
+    assert res["articles_crees"] == 0
     assert res["offres_non_rattachees"] == 1
-    assert len(db.articles._articles) == 0  # toujours aucun article : rien n'est cree
+    assert len(db.articles._articles) == 0
+
+
+def test_refuse_une_base_non_cloisonnee():
+    """Non-regression : l'import a d'abord ete branche par erreur sur la base
+    globale. Le compte-rendu restait plausible alors que l'ecriture partait
+    dans le catalogue d'un autre client. Le refus doit etre explicite."""
+    db = _FauseDB([])
+    db.tenant_id = None
+    with pytest.raises(ValueError, match="cloisonnement"):
+        asyncio.run(appliquer_offres(db, "Rexel", [_offre_sans_correspondance()]))

@@ -94,3 +94,7 @@ credentials.json
 *.key
 .credentials
 frontend/node_modules/.cache/default-development/0.pack
+
+# Journaux et artefacts de build locaux
+frontend/*.log
+frontend/build/

@@ -1,7 +1,6 @@
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Depends
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import json
 import logging
@@ -13,13 +12,19 @@ from datetime import datetime, timezone
 
 from catalogue_parser import parse_catalogue
 from supplier_import import parse_supplier_csv, appliquer_offres
+from auth import base_du_tenant, identite_courante, Identite
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+from db_postgres import PostgresDatabase
+
+# Stockage Postgres (Supabase), schema dedie `fournisseur` : isole des
+# tables de production du SaaS, qui vivent dans le schema `blueseatra`.
+db = PostgresDatabase(
+    os.environ['DATABASE_URL'],
+    schema=os.environ.get('DB_SCHEMA', 'fournisseur'),
+)
 
 app = FastAPI(title="BlueSeaTra — Gestion Achats TCE")
 api_router = APIRouter(prefix="/api")
@@ -117,7 +122,16 @@ class ProjectUpdate(BaseModel):
 # ----------------- Seed -----------------
 
 async def seed_data():
-    count = await db.articles.count_documents({})
+    """Charge le catalogue de demarrage dans le tenant designe par
+    SEED_TENANT_ID. Sans cette variable, aucun amorcage : chaque client
+    constitue son catalogue par import, ce qui est le comportement attendu
+    d'un nouveau compte."""
+    tenant = os.environ.get("SEED_TENANT_ID")
+    if not tenant:
+        logger.info("SEED_TENANT_ID absent : aucun amorcage")
+        return
+    tdb = db.for_tenant(tenant)
+    count = await tdb.articles.count_documents({})
     if count > 0:
         return
     data_file = ROOT_DIR / "catalogue_data.json"
@@ -130,23 +144,46 @@ async def seed_data():
     for a in arts:
         a["statut"] = derive_statut(a.get("fiabilite"))
     if arts:
-        await db.articles.insert_many(arts)
+        await tdb.articles.insert_many(arts)
     for name in ("synthese", "sources", "parametres", "controls"):
         docs = data.get(name, [])
         if docs:
-            await db[name].delete_many({})
-            await db[name].insert_many(docs)
-    logger.info("Seeded %d articles", len(arts))
+            await tdb[name].delete_many({})
+            await tdb[name].insert_many(docs)
+    logger.info("Catalogue de demarrage charge : %d articles (tenant %s)", len(arts), tenant)
 
 
 @app.on_event("startup")
 async def on_startup():
     await seed_data()
-    await db.articles.create_index("code")
-    await db.articles.create_index("lot")
 
 
 # ----------------- Catalogue endpoints -----------------
+
+@api_router.get("/me")
+async def me(identite: Identite = Depends(identite_courante)):
+    """Identite de l'appelant et societe active. Sert a l'interface pour
+    afficher le compte connecte et verifier que la session est valide."""
+    lignes = await db.raw(
+        "SELECT tenant_id FROM blueseatra.tenant_users WHERE user_id = $1",
+        identite.user_id,
+    )
+    tenants = sorted({l["tenant_id"] for l in lignes})
+    noms = await db.raw(
+        "SELECT tenant_id, company_name FROM blueseatra.company_profiles "
+        "WHERE tenant_id = ANY($1::text[])",
+        tenants,
+    )
+    libelles = {n["tenant_id"]: n["company_name"] for n in noms}
+    return {
+        "email": identite.email,
+        "tenant_id": identite.tenant_id,
+        "societes": [
+            {"tenant_id": t, "nom": libelles.get(t) or "Société sans nom"}
+            for t in tenants
+        ],
+    }
+
 
 @api_router.get("/health")
 async def health():
@@ -154,10 +191,10 @@ async def health():
 
 
 @api_router.get("/filters")
-async def get_filters():
-    lots = sorted(await db.articles.distinct("lot"))
-    fournisseurs = sorted([f for f in await db.articles.distinct("fournisseur_retenu") if f])
-    sous_familles = sorted([s for s in await db.articles.distinct("sous_famille") if s])
+async def get_filters(tdb=Depends(base_du_tenant)):
+    lots = sorted(await tdb.articles.distinct("lot"))
+    fournisseurs = sorted([f for f in await tdb.articles.distinct("fournisseur_retenu") if f])
+    sous_familles = sorted([s for s in await tdb.articles.distinct("sous_famille") if s])
     return {
         "lots": lots,
         "fournisseurs": fournisseurs,
@@ -181,6 +218,7 @@ async def get_catalogue(
     sort: str = "code",
     page: int = 1,
     page_size: int = 25,
+    tdb=Depends(base_du_tenant),
 ):
     q = {}
     if retenu:
@@ -206,16 +244,16 @@ async def get_catalogue(
         "prix_desc": [("prix_achat_ht", -1)],
         "article": [("article", 1)],
     }
-    total = await db.articles.count_documents(q)
-    cursor = db.articles.find(q, {"_id": 0}).sort(sort_map.get(sort, [("code", 1)]))
+    total = await tdb.articles.count_documents(q)
+    cursor = tdb.articles.find(q, {"_id": 0}).sort(sort_map.get(sort, [("code", 1)]))
     cursor = cursor.skip((page - 1) * page_size).limit(page_size)
     items = await cursor.to_list(page_size)
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 @api_router.get("/catalogue/{code}")
-async def get_article(code: str):
-    art = await db.articles.find_one({"code": code}, {"_id": 0})
+async def get_article(code: str, tdb=Depends(base_du_tenant)):
+    art = await tdb.articles.find_one({"code": code}, {"_id": 0})
     if not art:
         raise HTTPException(404, "Article introuvable")
     return art
@@ -224,8 +262,8 @@ async def get_article(code: str):
 # ----------------- Stats / KPIs -----------------
 
 @api_router.get("/stats/overview")
-async def stats_overview():
-    arts = await db.articles.find(
+async def stats_overview(tdb=Depends(base_du_tenant)):
+    arts = await tdb.articles.find(
         {},
         {"_id": 0, "statut": 1, "type_prix": 1, "prix_achat_ht": 1,
          "offers": 1, "lot": 1, "fournisseur_retenu": 1, "retrait": 1},
@@ -305,26 +343,30 @@ async def stats_overview():
 
 
 @api_router.get("/stats/by-lot")
-async def stats_by_lot():
-    pipeline = [
-        {"$group": {
-            "_id": "$lot",
-            "articles": {"$sum": 1},
-            "prix_moyen": {"$avg": "$prix_achat_ht"},
-            "valeur": {"$sum": {"$ifNull": ["$prix_achat_ht", 0]}},
-            "a_completer": {"$sum": {"$cond": [{"$eq": ["$statut", "a_completer"]}, 1, 0]}},
-            "a_verifier": {"$sum": {"$cond": [{"$eq": ["$statut", "a_verifier"]}, 1, 0]}},
-            "fiable": {"$sum": {"$cond": [{"$eq": ["$statut", "fiable"]}, 1, 0]}},
-        }},
-        {"$sort": {"_id": 1}},
-    ]
-    rows = await db.articles.aggregate(pipeline).to_list(100)
+async def stats_by_lot(tdb=Depends(base_du_tenant)):
+    rows = await tdb.raw(
+        f"""
+        SELECT doc->>'lot' AS lot,
+               count(*) AS articles,
+               avg((doc->>'prix_achat_ht')::numeric) AS prix_moyen,
+               coalesce(sum((doc->>'prix_achat_ht')::numeric), 0) AS valeur,
+               count(*) FILTER (WHERE doc->>'statut' = 'a_completer') AS a_completer,
+               count(*) FILTER (WHERE doc->>'statut' = 'a_verifier')  AS a_verifier,
+               count(*) FILTER (WHERE doc->>'statut' = 'fiable')      AS fiable
+        FROM "{tdb.schema}"."articles"
+        WHERE tenant_id = $1
+        GROUP BY doc->>'lot'
+        ORDER BY 1
+        LIMIT 100
+        """,
+        tdb.tenant_id,
+    )
     return [
         {
-            "lot": r["_id"],
+            "lot": r["lot"],
             "articles": r["articles"],
-            "prix_moyen": round(r["prix_moyen"] or 0, 2),
-            "valeur": round(r["valeur"] or 0, 2),
+            "prix_moyen": round(float(r["prix_moyen"] or 0), 2),
+            "valeur": round(float(r["valeur"] or 0), 2),
             "a_completer": r["a_completer"],
             "a_verifier": r["a_verifier"],
             "fiable": r["fiable"],
@@ -334,30 +376,35 @@ async def stats_by_lot():
 
 
 @api_router.get("/stats/by-supplier")
-async def stats_by_supplier():
-    pipeline = [
-        {"$match": {"fournisseur_retenu": {"$ne": None}}},
-        {"$group": {
-            "_id": "$fournisseur_retenu",
-            "articles": {"$sum": 1},
-            "prix_moyen": {"$avg": "$prix_achat_ht"},
-            "valeur": {"$sum": {"$ifNull": ["$prix_achat_ht", 0]}},
-            "votre_tarif": {"$sum": {"$cond": [
-                {"$regexMatch": {"input": {"$ifNull": ["$type_prix", ""]}, "regex": "tarif", "options": "i"}}, 1, 0]}},
-        }},
-        {"$sort": {"articles": -1}},
-    ]
-    rows = await db.articles.aggregate(pipeline).to_list(100)
-    sources = await db.sources.find({}, {"_id": 0}).to_list(100)
+async def stats_by_supplier(tdb=Depends(base_du_tenant)):
+    rows = await tdb.raw(
+        f"""
+        SELECT doc->>'fournisseur_retenu' AS fournisseur,
+               count(*) AS articles,
+               avg((doc->>'prix_achat_ht')::numeric) AS prix_moyen,
+               coalesce(sum((doc->>'prix_achat_ht')::numeric), 0) AS valeur,
+               count(*) FILTER (
+                   WHERE coalesce(doc->>'type_prix', '') ~* 'tarif'
+               ) AS votre_tarif
+        FROM "{tdb.schema}"."articles"
+        WHERE tenant_id = $1
+          AND doc->>'fournisseur_retenu' IS NOT NULL
+        GROUP BY doc->>'fournisseur_retenu'
+        ORDER BY articles DESC
+        LIMIT 100
+        """,
+        tdb.tenant_id,
+    )
+    sources = await tdb.sources.find({}, {"_id": 0}).to_list(100)
     smap = {s["enseigne"]: s for s in sources}
     out = []
     for r in rows:
-        src = smap.get(r["_id"], {})
+        src = smap.get(r["fournisseur"], {})
         out.append({
-            "fournisseur": r["_id"],
+            "fournisseur": r["fournisseur"],
             "articles": r["articles"],
-            "prix_moyen": round(r["prix_moyen"] or 0, 2),
-            "valeur": round(r["valeur"] or 0, 2),
+            "prix_moyen": round(float(r["prix_moyen"] or 0), 2),
+            "valeur": round(float(r["valeur"] or 0), 2),
             "votre_tarif": r["votre_tarif"],
             "site": src.get("site"),
             "acces": src.get("acces"),
@@ -367,10 +414,10 @@ async def stats_by_supplier():
 
 
 @api_router.get("/alerts")
-async def get_alerts():
-    a_completer = await db.articles.find({"statut": "a_completer"}, {"_id": 0}).to_list(500)
-    a_verifier = await db.articles.find({"statut": "a_verifier"}, {"_id": 0}).to_list(500)
-    controls = await db.controls.find({}, {"_id": 0}).to_list(500)
+async def get_alerts(tdb=Depends(base_du_tenant)):
+    a_completer = await tdb.articles.find({"statut": "a_completer"}, {"_id": 0}).to_list(500)
+    a_verifier = await tdb.articles.find({"statut": "a_verifier"}, {"_id": 0}).to_list(500)
+    controls = await tdb.controls.find({}, {"_id": 0}).to_list(500)
     return {
         "a_completer": a_completer,
         "a_verifier": a_verifier,
@@ -384,43 +431,43 @@ async def get_alerts():
 
 
 @api_router.get("/parametres")
-async def get_parametres():
-    params = await db.parametres.find({}, {"_id": 0}).to_list(100)
-    sources = await db.sources.find({}, {"_id": 0}).to_list(100)
+async def get_parametres(tdb=Depends(base_du_tenant)):
+    params = await tdb.parametres.find({}, {"_id": 0}).to_list(100)
+    sources = await tdb.sources.find({}, {"_id": 0}).to_list(100)
     return {"parametres": params, "sources": sources}
 
 
 # ----------------- Projects / Estimation -----------------
 
 @api_router.post("/projects")
-async def create_project(body: ProjectCreate):
+async def create_project(body: ProjectCreate, tdb=Depends(base_du_tenant)):
     doc = body.model_dump()
     doc["id"] = str(uuid.uuid4())
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     doc["updated_at"] = doc["created_at"]
     doc = compute_project(doc)
-    await db.projects.insert_one(dict(doc))
+    await tdb.projects.insert_one(dict(doc))
     doc.pop("_id", None)
     return doc
 
 
 @api_router.get("/projects")
-async def list_projects():
-    projs = await db.projects.find({}, {"_id": 0}).sort("updated_at", -1).to_list(200)
+async def list_projects(tdb=Depends(base_du_tenant)):
+    projs = await tdb.projects.find({}, {"_id": 0}).sort("updated_at", -1).to_list(200)
     return projs
 
 
 @api_router.get("/projects/{pid}")
-async def get_project(pid: str):
-    p = await db.projects.find_one({"id": pid}, {"_id": 0})
+async def get_project(pid: str, tdb=Depends(base_du_tenant)):
+    p = await tdb.projects.find_one({"id": pid}, {"_id": 0})
     if not p:
         raise HTTPException(404, "Projet introuvable")
     return p
 
 
 @api_router.put("/projects/{pid}")
-async def update_project(pid: str, body: ProjectUpdate):
-    p = await db.projects.find_one({"id": pid})
+async def update_project(pid: str, body: ProjectUpdate, tdb=Depends(base_du_tenant)):
+    p = await tdb.projects.find_one({"id": pid})
     if not p:
         raise HTTPException(404, "Projet introuvable")
     upd = {k: v for k, v in body.model_dump().items() if v is not None}
@@ -430,26 +477,26 @@ async def update_project(pid: str, body: ProjectUpdate):
     p["updated_at"] = datetime.now(timezone.utc).isoformat()
     p = compute_project(p)
     p.pop("_id", None)
-    await db.projects.replace_one({"id": pid}, dict(p))
+    await tdb.projects.replace_one({"id": pid}, dict(p))
     return p
 
 
 @api_router.delete("/projects/{pid}")
-async def delete_project(pid: str):
-    res = await db.projects.delete_one({"id": pid})
+async def delete_project(pid: str, tdb=Depends(base_du_tenant)):
+    res = await tdb.projects.delete_one({"id": pid})
     if res.deleted_count == 0:
         raise HTTPException(404, "Projet introuvable")
     return {"deleted": True}
 
 
 @api_router.get("/comparateur")
-async def comparateur():
+async def comparateur(tdb=Depends(base_du_tenant)):
     order = [
         "Au Forum du Bâtiment", "YESSS Électrique", "Rexel",
         "La Plateforme du Bâtiment", "Chausson Matériaux", "Point.P",
         "Prolians", "SFIC", "Icilux",
     ]
-    arts = await db.articles.find({}, {"_id": 0}).to_list(2000)
+    arts = await tdb.articles.find({}, {"_id": 0}).to_list(2000)
     items = []
     total_eco = 0.0
     eco_pcts = []
@@ -494,7 +541,7 @@ async def comparateur():
 
 
 @api_router.post("/catalogue/import")
-async def import_catalogue(file: UploadFile = File(...)):
+async def import_catalogue(file: UploadFile = File(...), tdb=Depends(base_du_tenant)):
     content = await file.read()
     try:
         data = parse_catalogue(content)
@@ -506,23 +553,23 @@ async def import_catalogue(file: UploadFile = File(...)):
     updated, added = 0, 0
     for a in arts:
         a["statut"] = derive_statut(a.get("fiabilite"))
-        existing = await db.articles.find_one({"code": a["code"]}, {"_id": 1})
+        existing = await tdb.articles.find_one({"code": a["code"]}, {"_id": 1})
         if existing:
-            await db.articles.update_one({"code": a["code"]}, {"$set": a})
+            await tdb.articles.update_one({"code": a["code"]}, {"$set": a})
             updated += 1
         else:
-            await db.articles.insert_one(dict(a))
+            await tdb.articles.insert_one(dict(a))
             added += 1
     for name in ("synthese", "sources", "parametres", "controls"):
         docs = data.get(name, [])
         if docs:
-            await db[name].delete_many({})
-            await db[name].insert_many([dict(d) for d in docs])
+            await tdb[name].delete_many({})
+            await tdb[name].insert_many([dict(d) for d in docs])
     return {"updated": updated, "added": added, "total": len(arts)}
 
 
 @api_router.post("/fournisseurs/{fournisseur}/import")
-async def import_offres_fournisseur(fournisseur: str, file: UploadFile = File(...)):
+async def import_offres_fournisseur(fournisseur: str, file: UploadFile = File(...), tdb=Depends(base_du_tenant)):
     """Importe un catalogue fournisseur brut (CSV) tel que produit par la
     collecte automatique (skill collecte-tarifs-fournisseurs-btp). Attache
     chaque ligne comme OFFRE sur l'article existant correspondant — ne cree
@@ -535,7 +582,7 @@ async def import_offres_fournisseur(fournisseur: str, file: UploadFile = File(..
         raise HTTPException(400, f"Fichier illisible : {e}")
     if not analyse["offres"]:
         raise HTTPException(400, "Aucune ligne exploitable (désignation manquante sur toutes les lignes).")
-    resultat = await appliquer_offres(db, fournisseur, analyse["offres"])
+    resultat = await appliquer_offres(tdb, fournisseur, analyse["offres"])
     resultat["lignes_lues"] = analyse["total_lu"]
     resultat["lignes_ignorees_sans_designation"] = analyse["lignes_ignorees"]
     resultat["lignes_sans_prix"] = analyse["sans_prix"]
@@ -547,9 +594,9 @@ class CodesBody(BaseModel):
 
 
 @api_router.post("/best-prices")
-async def best_prices(body: CodesBody):
+async def best_prices(body: CodesBody, tdb=Depends(base_du_tenant)):
     out = {}
-    arts = await db.articles.find(
+    arts = await tdb.articles.find(
         {"code": {"$in": body.codes}},
         {"_id": 0, "code": 1, "offers": 1, "prix_achat_ht": 1, "fournisseur_retenu": 1},
     ).to_list(2000)
@@ -566,8 +613,8 @@ async def best_prices(body: CodesBody):
 
 
 @api_router.get("/stats/decision")
-async def stats_decision():
-    arts = await db.articles.find(
+async def stats_decision(tdb=Depends(base_du_tenant)):
+    arts = await tdb.articles.find(
         {},
         {"_id": 0, "code": 1, "article": 1, "lot": 1, "unite": 1, "statut": 1,
          "offers": 1, "prix_achat_ht": 1, "fournisseur_retenu": 1},
@@ -631,4 +678,4 @@ logging.basicConfig(level=logging.INFO)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    client.close()
+    await db.close()
