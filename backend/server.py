@@ -2,6 +2,7 @@ from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Depends
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 import os
+from recherche_mots import filtre_recherche
 import json
 import logging
 from pathlib import Path
@@ -224,12 +225,11 @@ async def get_catalogue(
     if sous_famille:
         q["sous_famille"] = sous_famille
     if search:
-        rx = {"$regex": search, "$options": "i"}
-        q["$or"] = [
-            {"article": rx}, {"code": rx}, {"marque": rx},
-            {"ref_fournisseur": rx}, {"ref_fabricant": rx},
-            {"designation_fournisseur": rx},
-        ]
+        # Recherche par MOTS (voir recherche_mots.py) : chaque mot doit
+        # figurer dans l'un des champs, dans n'importe quel ordre.
+        filtre = filtre_recherche(search)
+        if filtre:
+            q["$and"] = filtre["$and"]
     sort_map = {
         "code": [("code", 1)],
         "prix_asc": [("prix_achat_ht", 1)],
