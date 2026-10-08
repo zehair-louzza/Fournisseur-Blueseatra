@@ -38,6 +38,10 @@ _VARIANTES = {
 }
 
 
+# « CX³ », « mm² » : la saisie normalisee devient « cx3 », « mm2 ».
+_EXPOSANTS = {"1": "¹", "2": "²", "3": "³"}
+
+
 def _sans_accent(texte: str) -> str:
     texte = unicodedata.normalize("NFKD", texte)
     return "".join(c for c in texte if not unicodedata.combining(c)).lower()
@@ -53,8 +57,9 @@ def mots_recherche(saisie: str) -> List[str]:
 
 def _singulier(mot: str) -> str:
     """Pluriel simple : « interrupteurs » cherche « interrupteur » (qui
-    trouve aussi le pluriel). Mots courts intacts : « vis », « bois »."""
-    if len(mot) > 4 and mot.isalpha() and mot[-1] in "sx":
+    trouve aussi le pluriel), « sols » cherche « sol ». Mots de 3 lettres
+    intacts (« vis ») ; « bois » cherche « boi », qui trouve toujours « bois »."""
+    if len(mot) >= 4 and mot.isalpha() and mot[-1] in "sx":
         return mot[:-1]
     return mot
 
@@ -65,6 +70,8 @@ def _motif(mot: str) -> str:
     for c in mot:
         if c in _VARIANTES:
             morceaux.append(f"[{_VARIANTES[c]}]")
+        elif c in _EXPOSANTS:
+            morceaux.append(f"[{c}{_EXPOSANTS[c]}]")
         elif c == ".":
             morceaux.append("[.,]")
         else:

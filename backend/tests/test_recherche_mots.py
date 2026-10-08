@@ -90,3 +90,17 @@ def test_sql_genere_parametre():
     assert sql.count("~*") == 12 and "tenant_id = $1" in sql
     assert "vis" not in sql and "bois" not in sql       # valeurs en parametres lies
     assert len(params) == 13
+
+
+def test_exposants_du_catalogue():
+    # Mesure 240 references : « Contacteur de puissance CX³ » perdu.
+    assert _correspond(filtre_recherche("Contacteur CX³"), {"article": "Contacteur CX³ 25 A"})
+    assert _correspond(filtre_recherche("cable 2.5 mm2"), {"article": "Câble 2,5 mm²"})
+
+
+def test_pluriel_des_mots_courts():
+    # Mesure 240 references : « sols pvc », « sacs gravats », « vmcs » echouaient.
+    assert _correspond(filtre_recherche("sols pvc"), {"article": "Sol PVC en le"})
+    assert _correspond(filtre_recherche("sacs gravats"), {"article": "Sac a gravats renforce"})
+    assert _correspond(filtre_recherche("vmcs simple flux"), {"article": "VMC simple flux"})
+    assert _correspond(filtre_recherche("vis"), {"article": "Vis a bois"})   # 3 lettres : intact
