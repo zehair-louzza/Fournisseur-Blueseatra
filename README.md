@@ -27,7 +27,7 @@ Catalogue matériels, comparateur multi-fournisseurs et estimateur de projet, cl
 ## Fonctionnalités
 
 - **Tableau de bord décisionnel** : économie fiable (hors prix « à vérifier »), meilleures opportunités, fournisseur recommandé par lot, répartition fiabilité et disponibilité.
-- **Catalogue** : recherche, filtres par lot, fournisseur et fiabilité, fiche détaillée avec toutes les offres examinées ; onglets « Produits examinés » et « Prix retenus ».
+- **Catalogue** : recherche par mots (chaque mot, dans n'importe quel ordre, sans tenir compte des accents ni du pluriel ; voir [docs/recherche-par-mots.md](docs/recherche-par-mots.md)), filtres par lot, fournisseur et fiabilité, fiche détaillée avec toutes les offres examinées ; onglets « Produits examinés » et « Prix retenus ».
 - **Comparateur de prix** : matrice multi-enseignes, meilleur prix mis en évidence, économie et écart moyen.
 - **Estimateur de projet** : lignes éditables (quantité, marge, TVA), marge par lot, récapitulatif achat / marge / HT / TVA / TTC, sauvegarde des projets.
 - **Fournisseurs** : analyse par enseigne.
