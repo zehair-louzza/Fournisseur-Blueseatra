@@ -8,7 +8,7 @@ Catalogue matériels, comparateur multi-fournisseurs et estimateur de projet, cl
 
 ![FastAPI](https://img.shields.io/badge/API-FastAPI-1B3F73?logo=fastapi&logoColor=white) ![React](https://img.shields.io/badge/Front-React-1B3F73?logo=react&logoColor=white) ![PostgreSQL](https://img.shields.io/badge/Base-Supabase%20PostgreSQL%20%C2%B7%20sch%C3%A9ma%20fournisseur-3AAFB9?logo=supabase&logoColor=white) ![Render](https://img.shields.io/badge/H%C3%A9bergement-Render-3AAFB9?logo=render&logoColor=white) [![Licence](https://img.shields.io/badge/licence-propri%C3%A9taire-555)](./LICENSE)
 
-[**Déploiement**](./DEPLOIEMENT.md) · [**Cahier des charges**](./memory/PRD.md) · [**SaaS Blueseatra**](https://github.com/zehair-louzza/Blueseatra) · [**Site**](https://blueseatra.com)
+[**Déploiement**](./DEPLOIEMENT.md) · [**Cahier des charges**](./memory/PRD.md) · [**Recherche par mots**](./docs/recherche-par-mots.md) · [**SaaS Blueseatra**](https://github.com/zehair-louzza/Blueseatra) · [**Site**](https://blueseatra.com) · [**Licence**](./LICENSE)
 
 </div>
 
@@ -36,6 +36,13 @@ Catalogue matériels, comparateur multi-fournisseurs et estimateur de projet, cl
 
 ## Architecture
 
+<img src="docs/assets/schema-architecture-fournisseur.png" alt="Architecture du module Fournisseur : navigateur, API FastAPI, API Blueseatra, Supabase" width="100%">
+
+Schéma généré par [`scripts/docs/generer_schemas_ecosysteme.py`](https://github.com/zehair-louzza/Blueseatra/blob/main/scripts/docs/generer_schemas_ecosysteme.py) dans le dépôt Blueseatra.
+
+<details>
+<summary>Vue texte</summary>
+
 ```text
 Navigateur ── React (Render, site statique, HashRouter)
                  │  jeton du SaaS
@@ -45,6 +52,8 @@ Navigateur ── React (Render, site statique, HashRouter)
                  ▼
           Supabase PostgreSQL, schéma `fournisseur` (documents JSONB, index SQL)
 ```
+
+</details>
 
 ## Structure
 
@@ -102,6 +111,22 @@ cd backend && pytest
 
 Le SaaS principal intègre désormais un catalogue fournisseurs commun (9 distributeurs, environ 967 000 références) et un comparateur de prix. Ce dépôt reste le module d'achats et d'estimation par lot, qui s'appuie sur les mêmes comptes.
 
+## Licence
+
+Logiciel **propriétaire**. Titulaire des droits : **Zehair Louzza**, exploitant le nom commercial « Blueseatra ». Le texte qui fait foi est le fichier [LICENSE](./LICENSE), version 2.0 du 10 octobre 2026.
+
+| Point | En pratique |
+|---|---|
+| Ce qui est protégé | Code, documentation, schémas, nom et logo, catalogues et données normalisées |
+| Ce que la publication sur GitHub permet | Consulter le dépôt et le dupliquer (« fork ») sur GitHub, comme l'imposent les conditions de GitHub. Rien d'autre |
+| Ce qui est interdit sans accord écrit | Copier, exécuter, modifier, redistribuer, proposer en SaaS, bâtir un produit concurrent, extraire les catalogues |
+| Intelligence artificielle | Opposition à la fouille de textes et de données (article L.122-5-3 du CPI) : aucun entraînement de modèle sur ce dépôt |
+| Tarifs et marques des distributeurs | Ils appartiennent à leurs titulaires ; aucun droit sur eux n'est concédé |
+| Contributions | Acceptées seulement avec cession des droits au titulaire |
+| Droit applicable | Droit français, tribunaux du ressort de la cour d'appel de Paris |
+
+Demande d'autorisation : `contact@blueseatra.com`.
+
 ---
 
-<sub>© Blueseatra. Tous droits réservés. Voir [LICENSE](./LICENSE).</sub>
+<sub>© 2025-2026 Zehair Louzza, exploitant le nom commercial « Blueseatra ». Logiciel propriétaire, tous droits réservés. Voir [LICENSE](./LICENSE).</sub>
